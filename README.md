@@ -26,6 +26,13 @@ local repository is the only way the declared inter-component dependencies
 (`qmdmm-6-dev` → `qmdmm-6` + `qmdmm-common-dev`, and the `-devel` equivalents)
 actually get resolved rather than sidestepped.
 
+Every job begins by bringing its own image up to date (`apt-get update` +
+`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora). An image is a
+snapshot, and installing onto a stale one would blend two different things
+together: what the package under test declares, and whatever the base image was
+simply missing. Refreshing first is what makes everything that lands afterwards
+attributable to the packages being tested.
+
 ## Package names
 
 The dev packages follow each distribution's own convention:
@@ -44,8 +51,8 @@ assertion — if a package ends up named something else, stage A fails.
 
 ## Acceptance criteria
 
-**Stage B** — after installing only the runtime package and running the repair
-command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
+**Stage B** — after bringing the base up to date, installing only the runtime
+package and running the repair command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
 `dnf check --dependencies` audit on Fedora):
 
 * `ldd` reports **zero** unresolved libraries for every installed QMdmm binary
@@ -61,8 +68,8 @@ command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
   connection is the part that shows the packaged client really got through over
   the packaged stack.
 
-**Stage C** — after installing only the dev package by name and running the same
-repair pass:
+**Stage C** — after bringing the base up to date, installing only the dev package
+by name and running the same repair pass:
 
 * `find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)` succeeds.
 * QMdmm's own `QMdmmGui`, `QMdmmBot` and `QMdmmServer` directories build through

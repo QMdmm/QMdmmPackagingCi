@@ -82,6 +82,26 @@ jobs:
             sfx_dev: '-6-devel'
             sfx_dev_common: '-common-devel'
     steps:
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          # A container image is a snapshot, and a stale one muddies the question
+          # this job asks: how much of what lands on the system can be attributed
+          # to the package under test and its declared dependencies. Refreshing
+          # the base first means everything installed afterwards is measured
+          # against a current archive rather than against whatever the image
+          # happened to be built from.
+          #
+          # apt-get dist-upgrade rather than upgrade: the transaction has to stay
+          # free to add and remove packages, which is what a distribution expects
+          # of a system it is about to install new software onto.
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
+          else
+            dnf -y --setopt=install_weak_deps=False upgrade
+          fi
+
       - name: Install toolchain, Qt 6 and the packagers
         run: |
           set -euxo pipefail
@@ -228,7 +248,27 @@ jobs:
             sfx_dev: '-6-devel'
             sfx_dev_common: '-common-devel'
     steps:
-      - name: Install inspection tooling and publish the local repository
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          # A container image is a snapshot, and a stale one muddies the question
+          # this job asks: how much of what lands on the system can be attributed
+          # to the package under test and its declared dependencies. Refreshing
+          # the base first means everything installed afterwards is measured
+          # against a current archive rather than against whatever the image
+          # happened to be built from.
+          #
+          # apt-get dist-upgrade rather than upgrade: the transaction has to stay
+          # free to add and remove packages, which is what a distribution expects
+          # of a system it is about to install new software onto.
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
+          else
+            dnf -y --setopt=install_weak_deps=False upgrade
+          fi
+
+      - name: Install the inspection tooling
         run: |
           set -euxo pipefail
           if [ '${{ matrix.dist.kind }}' = deb ]; then
@@ -494,6 +534,26 @@ jobs:
             sfx_dev: '-6-devel'
             sfx_dev_common: '-common-devel'
     steps:
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          # A container image is a snapshot, and a stale one muddies the question
+          # this job asks: how much of what lands on the system can be attributed
+          # to the package under test and its declared dependencies. Refreshing
+          # the base first means everything installed afterwards is measured
+          # against a current archive rather than against whatever the image
+          # happened to be built from.
+          #
+          # apt-get dist-upgrade rather than upgrade: the transaction has to stay
+          # free to add and remove packages, which is what a distribution expects
+          # of a system it is about to install new software onto.
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
+          else
+            dnf -y --setopt=install_weak_deps=False upgrade
+          fi
+
       - name: Install a plain build toolchain
         run: |
           set -euxo pipefail
