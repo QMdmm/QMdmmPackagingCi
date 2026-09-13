@@ -341,18 +341,27 @@ jobs:
           failed=0
 
           # Seeing the connection the server accepted is what turns "the bot is
-          # running" into "the bot really reached the server". That is read out
-          # of /proc/net/tcp, where QMdmm's default TCP port 6366 spells 18DE and
-          # 0A/01 mean LISTEN/ESTABLISHED. If a container ever hides that file,
-          # warn and fall back to liveness: a blind harness must not fail an
-          # otherwise sound package, and the warning says the check was skipped.
+          # running" into "the bot really reached the server". That is read out of
+          # the kernel's socket tables, where QMdmm's default TCP port 6366 spells
+          # 18DE and 0A/01 mean LISTEN/ESTABLISHED. If a container ever hides
+          # those files, warn and fall back to liveness: a blind harness must not
+          # fail an otherwise sound package, and the warning says the check was
+          # skipped.
           port_hex=18DE
+          net_files=''
+          for f in /proc/net/tcp /proc/net/tcp6; do
+            if [ -r "$f" ]; then net_files="$net_files $f"; fi
+          done
           net_visible=0
-          [ -r /proc/net/tcp ] && net_visible=1
-          is_listening() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +0A" /proc/net/tcp; }
-          is_connected() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +01" /proc/net/tcp; }
+          [ -n "$net_files" ] && net_visible=1
+          # Both tables, deliberately: the server listens on QHostAddress::Any,
+          # which Qt maps to the dual-stack IPv6 wildcard, so its socket lives in
+          # tcp6 - and the address width differs between the two files, hence the
+          # unanchored [0-9A-F]+. $net_files is meant to word-split.
+          is_listening() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +0A" $net_files; }
+          is_connected() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +01" $net_files; }
           if [ "$net_visible" -eq 0 ]; then
-            echo "::warning::/proc/net/tcp is not readable here; the connection checks are skipped"
+            echo "::warning::neither /proc/net/tcp nor /proc/net/tcp6 is readable here; the connection checks are skipped"
           fi
 
           {
@@ -427,6 +436,12 @@ jobs:
             echo "### /usr/bin/QMdmmBot6 connected to /usr/bin/QMdmmServer6 over TCP"
           elif [ "$net_visible" -eq 1 ]; then
             echo "::error::no established connection on port 6366: the bot never reached the server"
+            # Leave evidence behind: which sockets the kernel does know about
+            # says far more than "it did not work". 02 is SYN_SENT (nothing is
+            # answering), 04/06 mean the handshake finished and the far end then
+            # closed, 01 means it is up right now.
+            echo "### Sockets referencing port 6366 after the failure:"
+            grep -hE ":${port_hex} " $net_files || echo '(none at all)'
             failed=1
           fi
           if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' /tmp/bot.err; then
@@ -621,16 +636,24 @@ jobs:
 
           export QT_QPA_PLATFORM=offscreen
 
-          # Same connection probe as the runtime stage: port 6366 reads 18DE in
-          # /proc/net/tcp, 0A is LISTEN and 01 is ESTABLISHED. Falls back to
-          # liveness, with a warning, if that file is not readable here.
+          # Same connection probe as the runtime stage: 6366 reads 18DE in the
+          # kernel socket tables, 0A is LISTEN and 01 is ESTABLISHED. Falls back
+          # to liveness, with a warning, if those files are not readable here.
           port_hex=18DE
+          net_files=''
+          for f in /proc/net/tcp /proc/net/tcp6; do
+            if [ -r "$f" ]; then net_files="$net_files $f"; fi
+          done
           net_visible=0
-          [ -r /proc/net/tcp ] && net_visible=1
-          is_listening() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +0A" /proc/net/tcp; }
-          is_connected() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +01" /proc/net/tcp; }
+          [ -n "$net_files" ] && net_visible=1
+          # Both tables, deliberately: the server listens on QHostAddress::Any,
+          # which Qt maps to the dual-stack IPv6 wildcard, so its socket lives in
+          # tcp6 - and the address width differs between the two files, hence the
+          # unanchored [0-9A-F]+. $net_files is meant to word-split.
+          is_listening() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +0A" $net_files; }
+          is_connected() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +01" $net_files; }
           if [ "$net_visible" -eq 0 ]; then
-            echo "::warning::/proc/net/tcp is not readable here; the connection checks are skipped"
+            echo "::warning::neither /proc/net/tcp nor /proc/net/tcp6 is readable here; the connection checks are skipped"
           fi
 
           timeout 20 consumer-build/qmdmm-gui/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
@@ -691,6 +714,8 @@ jobs:
             echo "### the rebuilt Bot connected to the installed server over TCP"
           elif [ "$net_visible" -eq 1 ]; then
             echo "::error::no established connection on port 6366: the rebuilt Bot never reached the server"
+            echo "### Sockets referencing port 6366 after the failure:"
+            grep -hE ":${port_hex} " $net_files || echo '(none at all)'
             failed=1
           fi
 
