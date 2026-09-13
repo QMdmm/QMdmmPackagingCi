@@ -45,6 +45,9 @@ permissions:
 
 env:
   QMDMM_REPO: https://github.com/Fsu0413/QMdmm.git
+  # Containers start with LANG unset, so Qt switches itself to C.UTF-8 and says
+  # so on every launch. Setting it here keeps that noise out of the probe logs.
+  LANG: C.UTF-8
 
 defaults:
   run:
@@ -337,6 +340,21 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
           failed=0
 
+          # Seeing the connection the server accepted is what turns "the bot is
+          # running" into "the bot really reached the server". That is read out
+          # of /proc/net/tcp, where QMdmm's default TCP port 6366 spells 18DE and
+          # 0A/01 mean LISTEN/ESTABLISHED. If a container ever hides that file,
+          # warn and fall back to liveness: a blind harness must not fail an
+          # otherwise sound package, and the warning says the check was skipped.
+          port_hex=18DE
+          net_visible=0
+          [ -r /proc/net/tcp ] && net_visible=1
+          is_listening() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +0A" /proc/net/tcp; }
+          is_connected() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +01" /proc/net/tcp; }
+          if [ "$net_visible" -eq 0 ]; then
+            echo "::warning::/proc/net/tcp is not readable here; the connection checks are skipped"
+          fi
+
           {
             echo '### Programs started from the installed runtime package'
             echo
@@ -345,27 +363,91 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-          probe() {
-            local name="$1"; shift
-            local limit="$1"; shift
-            timeout "$limit" "$@" >"/tmp/$name.out" 2>"/tmp/$name.err"
-            local rc=$?
-            echo "### $name rc=$rc"
-            sed -e 's/^/  out| /' "/tmp/$name.out"
-            sed -e 's/^/  err| /' "/tmp/$name.err"
-            case "$rc" in
-              0|124) echo "  -> survived (rc=$rc)" ;;
-              *)     echo "::error::$name exited with rc=$rc"; failed=1 ;;
-            esac
-            if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' "/tmp/$name.err"; then
-              echo "::error::$name has a dynamic loading failure"
+          # The GUI is the only program that runs on its own.
+          timeout 20 /usr/bin/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
+          rc=$?
+          echo "### /usr/bin/QMdmm6 rc=$rc"
+          sed -e 's/^/  err| /' /tmp/gui.err
+          if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
+            echo "::error::QMdmm6 exited with rc=$rc"
+            failed=1
+          fi
+          if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' /tmp/gui.err; then
+            echo "::error::QMdmm6 has a dynamic loading failure"
+            failed=1
+          fi
+
+          # The server calls qFatal() when it cannot listen, which aborts with a
+          # non-zero status, so staying alive is what "it runs" means here.
+          /usr/bin/QMdmmServer6 >/tmp/server.out 2>/tmp/server.err &
+          server_pid=$!
+          for _ in $(seq 1 40); do
+            kill -0 "$server_pid" 2>/dev/null || break
+            if [ "$net_visible" -eq 1 ] && is_listening; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$server_pid" 2>/dev/null; then
+            echo "### /usr/bin/QMdmmServer6 is running"
+            if [ "$net_visible" -eq 1 ] && ! is_listening; then
+              echo "::error::QMdmmServer6 is up but nothing is listening on TCP 6366"
               failed=1
             fi
-          }
+          else
+            wait "$server_pid"
+            rc=$?
+            sed -e 's/^/  err| /' /tmp/server.err
+            echo "::error::QMdmmServer6 exited with rc=$rc"
+            failed=1
+          fi
 
-          probe gui 20 /usr/bin/QMdmm6
-          probe server 10 /usr/bin/QMdmmServer6
-          probe bot 10 /usr/bin/QMdmmBot6
+          # The bot refuses to start at all without --host (it exits 3 instead of
+          # running) and, with one, it stays in its event loop forever: an exit
+          # status alone cannot tell "connected" from "dialling a host that never
+          # answers", because the client simply retries. The proof is the
+          # accepted connection on the server side, which only exists once the
+          # packaged client really got through over the packaged stack.
+          /usr/bin/QMdmmBot6 --host=qmdmm://localhost:6366 >/tmp/bot.out 2>/tmp/bot.err &
+          bot_pid=$!
+          bot_connected=0
+          for _ in $(seq 1 60); do
+            kill -0 "$bot_pid" 2>/dev/null || break
+            if is_connected; then bot_connected=1; break; fi
+            sleep 0.25
+          done
+          if kill -0 "$bot_pid" 2>/dev/null; then
+            echo "### /usr/bin/QMdmmBot6 is up and in its event loop"
+          else
+            wait "$bot_pid"
+            rc=$?
+            echo "::error::QMdmmBot6 exited with rc=$rc instead of staying connected"
+            failed=1
+          fi
+          sed -e 's/^/  err| /' /tmp/bot.err
+          if [ "$bot_connected" -eq 1 ]; then
+            echo "### /usr/bin/QMdmmBot6 connected to /usr/bin/QMdmmServer6 over TCP"
+          elif [ "$net_visible" -eq 1 ]; then
+            echo "::error::no established connection on port 6366: the bot never reached the server"
+            failed=1
+          fi
+          if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' /tmp/bot.err; then
+            echo "::error::QMdmmBot6 has a dynamic loading failure"
+            failed=1
+          fi
+
+          # The server's own log is the other side of that connection.
+          server_log=$(ls -1t /var/QMdmm/log/QMdmmServer-* 2>/dev/null | head -1)
+          if [ -n "$server_log" ] && [ -s "$server_log" ]; then
+            {
+              echo "### Server-side log (\`$server_log\`)"
+              echo
+              echo '```'
+              tail -40 "$server_log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          kill "$bot_pid" "$server_pid" 2>/dev/null
+          wait 2>/dev/null
 
           [ "$failed" -eq 0 ]
 
@@ -539,25 +621,81 @@ jobs:
 
           export QT_QPA_PLATFORM=offscreen
 
+          # Same connection probe as the runtime stage: port 6366 reads 18DE in
+          # /proc/net/tcp, 0A is LISTEN and 01 is ESTABLISHED. Falls back to
+          # liveness, with a warning, if that file is not readable here.
+          port_hex=18DE
+          net_visible=0
+          [ -r /proc/net/tcp ] && net_visible=1
+          is_listening() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +0A" /proc/net/tcp; }
+          is_connected() { grep -qE ":${port_hex} +[0-9A-F]{8}:[0-9A-F]{4} +01" /proc/net/tcp; }
+          if [ "$net_visible" -eq 0 ]; then
+            echo "::warning::/proc/net/tcp is not readable here; the connection checks are skipped"
+          fi
+
           timeout 20 consumer-build/qmdmm-gui/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
           rc=$?
           echo "### rebuilt GUI rc=$rc"
-          sed -e 's/^/  out| /' /tmp/gui.out
           sed -e 's/^/  err| /' /tmp/gui.err
-          case "$rc" in
-            0|124) echo "  -> survived (rc=$rc)" ;;
-            *)     echo "::error::rebuilt GUI exited with rc=$rc"; failed=1 ;;
-          esac
+          if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
+            echo "::error::rebuilt GUI exited with rc=$rc"
+            failed=1
+          fi
 
-          timeout 10 consumer-build/qmdmm-bot/QMdmmBot6 >/tmp/bot.out 2>/tmp/bot.err
-          rc=$?
-          echo "### rebuilt Bot rc=$rc"
-          sed -e 's/^/  out| /' /tmp/bot.out
+          # The rebuilt bot is pointed at the *installed* server, which the dev
+          # package dragged in as its runtime dependency. That closes the loop: a
+          # source build against the dev package talking to the packaged runtime.
+          /usr/bin/QMdmmServer6 >/tmp/server.out 2>/tmp/server.err &
+          server_pid=$!
+          for _ in $(seq 1 40); do
+            kill -0 "$server_pid" 2>/dev/null || break
+            if [ "$net_visible" -eq 1 ] && is_listening; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$server_pid" 2>/dev/null; then
+            echo "### the installed /usr/bin/QMdmmServer6 is running"
+            if [ "$net_visible" -eq 1 ] && ! is_listening; then
+              echo "::error::the installed QMdmmServer6 is up but nothing is listening on TCP 6366"
+              failed=1
+            fi
+          else
+            wait "$server_pid"
+            rc=$?
+            sed -e 's/^/  err| /' /tmp/server.err
+            echo "::error::the installed QMdmmServer6 exited with rc=$rc"
+            failed=1
+          fi
+
+          # Without --host the bot exits 3; with one it stays in its event loop
+          # even when nothing answers, so the accepted connection - not the exit
+          # status - is what proves it really got through.
+          consumer-build/qmdmm-bot/QMdmmBot6 --host=qmdmm://localhost:6366 \
+            >/tmp/bot.out 2>/tmp/bot.err &
+          bot_pid=$!
+          bot_connected=0
+          for _ in $(seq 1 60); do
+            kill -0 "$bot_pid" 2>/dev/null || break
+            if is_connected; then bot_connected=1; break; fi
+            sleep 0.25
+          done
+          if kill -0 "$bot_pid" 2>/dev/null; then
+            echo "### the rebuilt Bot is up and in its event loop"
+          else
+            wait "$bot_pid"
+            rc=$?
+            echo "::error::the rebuilt Bot exited with rc=$rc instead of staying connected"
+            failed=1
+          fi
           sed -e 's/^/  err| /' /tmp/bot.err
-          case "$rc" in
-            0|124) echo "  -> survived (rc=$rc)" ;;
-            *)     echo "::error::rebuilt Bot exited with rc=$rc"; failed=1 ;;
-          esac
+          if [ "$bot_connected" -eq 1 ]; then
+            echo "### the rebuilt Bot connected to the installed server over TCP"
+          elif [ "$net_visible" -eq 1 ]; then
+            echo "::error::no established connection on port 6366: the rebuilt Bot never reached the server"
+            failed=1
+          fi
+
+          kill "$bot_pid" "$server_pid" 2>/dev/null
+          wait 2>/dev/null
 
           [ "$failed" -eq 0 ]
 
@@ -573,6 +711,11 @@ jobs:
             echo '`add_subdirectory` and resolved against `QMdmm6::Core` and'
             echo '`QMdmm6::Networking`. A green run means the dev package is'
             echo 'sufficient to rebuild the GUI and the Bot.'
+            echo
+            echo 'The rebuilt Bot is also pointed at the installed `QMdmmServer6`'
+            echo '(the dev package drags the runtime in), and the server has to'
+            echo 'report the connection before the step passes - so a source build'
+            echo 'against the dev package really talks to the packaged runtime.'
             echo
             echo '```'
             grep -E 'QMdmm6_VERSION|QT_GENERATION|Qt6.*DIR' /tmp/consumer-configure.log | head -20 || true

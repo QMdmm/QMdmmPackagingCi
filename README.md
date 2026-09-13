@@ -52,7 +52,14 @@ command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
   and shared library.
 * `QT_QPA_PLATFORM=offscreen timeout 20 QMdmm6` is still running when the timeout
   fires (`rc` 124), i.e. the GUI really starts and does not fall over.
-* `QMdmmServer6` and `QMdmmBot6` start without a dynamic loading failure.
+* `QMdmmServer6` starts and stays up — it calls `qFatal()` when it cannot bind
+  its sockets, so surviving is only possible if it listened.
+* `QMdmmBot6 --host=qmdmm://localhost:6366` stays up **and** the server reports the
+  connection it accepted. The exit status alone would prove nothing here: the Bot
+  refuses to start without `--host` (exit 3), and with one it sits in its event
+  loop even when nothing answers, because the client retries. The accepted
+  connection is the part that shows the packaged client really got through over
+  the packaged stack.
 
 **Stage C** — after installing only the dev package by name and running the same
 repair pass:
@@ -61,7 +68,13 @@ repair pass:
 * QMdmm's own `QMdmmGui` and `QMdmmBot` directories build through
   `add_subdirectory` against `QMdmm6::Core` / `QMdmm6::Networking`, producing
   `QMdmm6` and `QMdmmBot6` executables.
-* Those executables have no unresolved libraries and survive under `offscreen`.
+* Those executables have no unresolved libraries and survive under `offscreen`,
+  and the **rebuilt** Bot connects to the **installed** `QMdmmServer6` — so a
+  source build against the dev package demonstrably talks to the packaged runtime.
+
+The connection checks read `/proc/net/tcp` (port 6366 is `18DE`, `0A` is LISTEN,
+`01` is ESTABLISHED). If a container ever hides that file the harness warns and
+falls back to liveness rather than failing a sound package.
 
 The "minimal" half of "minimal but complete" is reported rather than enforced:
 the job summary records what the repair pass had to add, and what installing only
