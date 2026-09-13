@@ -310,6 +310,9 @@ jobs:
 
       - name: Check that every installed QMdmm binary and library resolves
         run: |
+          # GitHub runs the step body with -e, and every assertion below is about
+          # a non-zero exit status, so errexit is turned off explicitly.
+          set +e
           set -uo pipefail
           targets=$(ls /usr/bin/QMdmm6 /usr/bin/QMdmmBot6 /usr/bin/QMdmmServer6)
           targets="$targets $(ls /usr/lib/*/libQMdmmCore6.so.* /usr/lib/*/libQMdmmNetworking6.so.* 2>/dev/null || true)"
@@ -327,6 +330,9 @@ jobs:
 
       - name: Run the installed programs
         run: |
+          # GitHub runs the step body with -e, and every assertion below is about
+          # a non-zero exit status, so errexit is turned off explicitly.
+          set +e
           set -uo pipefail
           export QT_QPA_PLATFORM=offscreen
           failed=0
@@ -512,6 +518,9 @@ jobs:
 
       - name: Verify the executables the consumer produced
         run: |
+          # GitHub runs the step body with -e, and every assertion below is about
+          # a non-zero exit status, so errexit is turned off explicitly.
+          set +e
           set -uo pipefail
           failed=0
           for exe in consumer-build/qmdmm-gui/QMdmm6 consumer-build/qmdmm-bot/QMdmmBot6; do
