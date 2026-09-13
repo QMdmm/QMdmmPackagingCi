@@ -1,0 +1,571 @@
+name: Packaging smoke
+
+# Container-based packaging verification for Fsu0413/QMdmm.
+#
+# Three stages, run once per distribution:
+#
+#   A  pack     build QMdmm with a full toolchain inside the distribution's own
+#               container and run cpack there.
+#   B  runtime  a *clean* container of the same distribution installs only the
+#               runtime package, repairs the dependency set, then proves the
+#               programs load and run.
+#   C  dev      another clean container installs the dev package, repairs the
+#               dependency set, then builds QMdmm's own GUI and Bot from source
+#               against the installed package via find_package(QMdmm6).
+#
+# B and C deliberately do NOT reuse A's container. With the toolchain and the Qt
+# development packages still installed, a missing runtime dependency would be
+# masked by them and "minimal but complete" could not be verified at all.
+#
+# The packages are installed from a local repository built out of the artifacts
+# rather than by file path: that is the only way the declared inter-component
+# dependencies (qmdmm-dev6 -> qmdmm-6 + qmdmm-dev-common) are actually resolved
+# instead of being sidestepped.
+
+on:
+  workflow_dispatch:
+    inputs:
+      qmdmm_ref:
+        description: 'QMdmm ref (branch, tag or commit) to package and verify'
+        required: true
+        default: 'packaging-consumer-support'
+        type: string
+      build_type:
+        description: 'CMake build type'
+        required: true
+        default: 'Release'
+        type: choice
+        options:
+          - Release
+          - MinSizeRel
+          - Debug
+
+permissions:
+  contents: read
+
+env:
+  QMDMM_REPO: https://github.com/Fsu0413/QMdmm.git
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+
+  # ================================================================= stage A
+  pack:
+    name: "A pack (${{ matrix.dist.name }})"
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.dist.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          # The sfx_* fields are the package-name suffixes the later stages
+          # select on. They differ per distribution because the development
+          # packages follow each distribution's own convention: "-dev" on
+          # Debian, "-devel" on Fedora.
+          - name: debian
+            image: 'debian:sid'
+            kind: deb
+            sfx_runtime: '-6'
+            sfx_dev: '-6-dev'
+            sfx_dev_common: '-common-dev'
+          - name: fedora
+            image: 'fedora:latest'
+            kind: rpm
+            sfx_runtime: '-6'
+            sfx_dev: '-6-devel'
+            sfx_dev_common: '-common-devel'
+    steps:
+      - name: Install toolchain, Qt 6 and the packagers
+        run: |
+          set -euxo pipefail
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              git ca-certificates build-essential cmake ninja-build pkg-config \
+              qt6-base-dev qt6-websockets-dev qt6-declarative-dev \
+              qt6-declarative-dev-tools qt6-tools-dev qt6-tools-dev-tools \
+              qt6-l10n-tools doxygen graphviz
+          else
+            dnf install -y --setopt=install_weak_deps=False \
+              git ca-certificates gcc-c++ make cmake ninja-build rpm-build rpm \
+              qt6-qtbase-devel qt6-qtwebsockets-devel qt6-qtdeclarative-devel \
+              qt6-qttools-devel doxygen graphviz
+          fi
+
+      - name: Fetch QMdmm at the requested ref
+        run: |
+          set -euxo pipefail
+          git init qmdmm-src
+          git -C qmdmm-src remote add origin "$QMDMM_REPO"
+          git -C qmdmm-src fetch --depth 1 origin '${{ inputs.qmdmm_ref }}'
+          git -C qmdmm-src checkout --detach FETCH_HEAD
+          echo "QMdmm HEAD: $(git -C qmdmm-src log --oneline -1)"
+
+      - name: Configure
+        run: |
+          set -euxo pipefail
+          # /usr is where a distribution package installs: it decides both the
+          # on-disk layout and the baked-in QMDMM_CONFIGURATION_PREFIX.
+          cmake -S qmdmm-src -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE='${{ inputs.build_type }}' \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DBUILD_TESTING=OFF \
+            -DQMDMM_EXPORT_PRIVATE=NO
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Pack
+        run: |
+          set -euxo pipefail
+          cd build
+          # Only the native generators: the archive generators the project also
+          # configures (7Z/TGZ/TXZ/TZST/ZIP) are not what this workflow verifies.
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            cpack -G DEB
+          else
+            cpack -G RPM
+          fi
+
+      - name: Collect packages and record their real names
+        run: |
+          set -euxo pipefail
+          ext='${{ matrix.dist.kind }}'
+          mkdir -p out
+          cp -v build/*."$ext" out/
+
+          # Names are read back out of the packages instead of being assumed:
+          # the component suffixes are what stages B and C select on.
+          printf 'package\tversion\tfile\n' > out/MANIFEST.tsv
+          for f in out/*."$ext"; do
+            if [ "$ext" = deb ]; then
+              p=$(dpkg-deb -f "$f" Package)
+              v=$(dpkg-deb -f "$f" Version)
+            else
+              p=$(rpm -qp --qf '%{NAME}' "$f")
+              v=$(rpm -qp --qf '%{VERSION}' "$f")
+            fi
+            printf '%s\t%s\t%s\n' "$p" "$v" "$(basename "$f")" >> out/MANIFEST.tsv
+          done
+
+          {
+            echo "### Packages produced by \`cpack -G $ext\`"
+            echo
+            echo '```'
+            cat out/MANIFEST.tsv
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          missing=''
+          for suffix in '${{ matrix.dist.sfx_runtime }}' '${{ matrix.dist.sfx_dev }}' \
+                        '${{ matrix.dist.sfx_dev_common }}' -doc; do
+            awk -F'\t' -v s="$suffix" '$1 ~ s"$" { found = 1 } END { exit !found }' \
+              out/MANIFEST.tsv || missing="$missing $suffix"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing component package(s) with suffix:$missing"
+            exit 1
+          fi
+
+      - name: Dump the declared dependency metadata
+        run: |
+          set -euxo pipefail
+          ext='${{ matrix.dist.kind }}'
+          {
+            echo "### Declared dependencies as shipped"
+            echo
+            for f in out/*."$ext"; do
+              echo "#### \`$(basename "$f")\`"
+              echo '```'
+              if [ "$ext" = deb ]; then
+                dpkg-deb -f "$f" Package Depends
+              else
+                rpm -qpi "$f" | grep -E '^(Name|Version|Requires)' || true
+              fi
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ matrix.dist.name }}
+          path: out
+          if-no-files-found: error
+
+  # ================================================================= stage B
+  verify-runtime:
+    name: "B runtime (${{ matrix.dist.name }})"
+    needs: pack
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.dist.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          # The sfx_* fields are the package-name suffixes the later stages
+          # select on. They differ per distribution because the development
+          # packages follow each distribution's own convention: "-dev" on
+          # Debian, "-devel" on Fedora.
+          - name: debian
+            image: 'debian:sid'
+            kind: deb
+            sfx_runtime: '-6'
+            sfx_dev: '-6-dev'
+            sfx_dev_common: '-common-dev'
+          - name: fedora
+            image: 'fedora:latest'
+            kind: rpm
+            sfx_runtime: '-6'
+            sfx_dev: '-6-devel'
+            sfx_dev_common: '-common-devel'
+    steps:
+      - name: Install inspection tooling and publish the local repository
+        run: |
+          set -euxo pipefail
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              binutils dpkg-dev apt-utils
+          else
+            dnf install -y --setopt=install_weak_deps=False binutils createrepo_c
+          fi
+          command -v ldd
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-${{ matrix.dist.name }}
+          path: pkgs
+
+      - name: Publish the packages as a local repository
+        run: |
+          set -euxo pipefail
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            cd pkgs
+            dpkg-scanpackages -m . > Packages
+            apt-ftparchive release . > Release
+            echo "deb [trusted=yes] file://$PWD ./" > /etc/apt/sources.list.d/qmdmm-local.list
+            cd ..
+            apt-get update
+          else
+            createrepo_c pkgs
+            printf '[qmdmm-local]\nname=QMdmm local\nbaseurl=file://%s/pkgs\nenabled=1\ngpgcheck=0\n' \
+              "$PWD" > /etc/yum.repos.d/qmdmm-local.repo
+            cat /etc/yum.repos.d/qmdmm-local.repo
+          fi
+
+      - name: Install the runtime package and repair the dependency set (deb)
+        if: matrix.dist.kind == 'deb'
+        run: |
+          set -euxo pipefail
+          runtime=$(awk -F'\t' -v s='${{ matrix.dist.sfx_runtime }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "runtime package: $runtime"
+          apt-get install -y "$runtime"
+          echo '::group::apt-get -f install (repair pass)'
+          apt-get -f install -y 2>&1 | tee /tmp/repair.log
+          echo '::endgroup::'
+          apt-get check
+          {
+            echo '### Runtime install: what the repair pass had to add'
+            echo
+            echo '```'
+            grep -E '^(Inst|Conf|Remv|Removing|The following)' /tmp/repair.log \
+              || echo '(nothing: the declared dependencies were complete)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the runtime package and repair the dependency set (rpm)
+        if: matrix.dist.kind == 'rpm'
+        run: |
+          set -euxo pipefail
+          runtime=$(awk -F'\t' -v s='${{ matrix.dist.sfx_runtime }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "runtime package: $runtime"
+          # dnf resolves the whole transaction or fails, so the "repair" pass
+          # here is a second, idempotent install plus a dependency audit.
+          dnf install -y "$runtime"
+          dnf install -y "$runtime"
+          if dnf check --dependencies > /tmp/dnfcheck.log 2>&1; then
+            echo 'dnf check: clean'
+          else
+            cat /tmp/dnfcheck.log
+            if grep -qE 'qmdmm|libQt6|qt6-' /tmp/dnfcheck.log; then
+              echo '::error::dnf reports unsatisfied dependencies for a QMdmm/Qt package'
+              exit 1
+            fi
+            echo '(dnf check reported unrelated issues; not caused by this package)'
+          fi
+          {
+            echo '### Runtime install: dependency audit'
+            echo
+            echo '```'
+            cat /tmp/dnfcheck.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check that every installed QMdmm binary and library resolves
+        run: |
+          set -uo pipefail
+          targets=$(ls /usr/bin/QMdmm6 /usr/bin/QMdmmBot6 /usr/bin/QMdmmServer6)
+          targets="$targets $(ls /usr/lib/*/libQMdmmCore6.so.* /usr/lib/*/libQMdmmNetworking6.so.* 2>/dev/null || true)"
+          targets="$targets $(ls /usr/lib/libQMdmmCore6.so.* /usr/lib/libQMdmmNetworking6.so.* 2>/dev/null || true)"
+          failed=0
+          for t in $targets; do
+            echo "### ldd $t"
+            ldd "$t" | tee /tmp/ldd.log
+            if grep -q 'not found' /tmp/ldd.log; then
+              echo "::error::$t has unresolved shared libraries"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ]
+
+      - name: Run the installed programs
+        run: |
+          set -uo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          failed=0
+
+          {
+            echo '### Programs started from the installed runtime package'
+            echo
+            echo 'rc=124 means the program was still running when the timeout hit,'
+            echo 'which is what a GUI, a server and a bot are supposed to do.'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          probe() {
+            local name="$1"; shift
+            local limit="$1"; shift
+            timeout "$limit" "$@" >"/tmp/$name.out" 2>"/tmp/$name.err"
+            local rc=$?
+            echo "### $name rc=$rc"
+            sed -e 's/^/  out| /' "/tmp/$name.out"
+            sed -e 's/^/  err| /' "/tmp/$name.err"
+            case "$rc" in
+              0|124) echo "  -> survived (rc=$rc)" ;;
+              *)     echo "::error::$name exited with rc=$rc"; failed=1 ;;
+            esac
+            if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' "/tmp/$name.err"; then
+              echo "::error::$name has a dynamic loading failure"
+              failed=1
+            fi
+          }
+
+          probe gui 20 /usr/bin/QMdmm6
+          probe server 10 /usr/bin/QMdmmServer6
+          probe bot 10 /usr/bin/QMdmmBot6
+
+          [ "$failed" -eq 0 ]
+
+  # ================================================================= stage C
+  verify-dev:
+    name: "C dev (${{ matrix.dist.name }})"
+    needs: pack
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.dist.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          # The sfx_* fields are the package-name suffixes the later stages
+          # select on. They differ per distribution because the development
+          # packages follow each distribution's own convention: "-dev" on
+          # Debian, "-devel" on Fedora.
+          - name: debian
+            image: 'debian:sid'
+            kind: deb
+            sfx_runtime: '-6'
+            sfx_dev: '-6-dev'
+            sfx_dev_common: '-common-dev'
+          - name: fedora
+            image: 'fedora:latest'
+            kind: rpm
+            sfx_runtime: '-6'
+            sfx_dev: '-6-devel'
+            sfx_dev_common: '-common-devel'
+    steps:
+      - name: Install a plain build toolchain
+        run: |
+          set -euxo pipefail
+          # What a user already has before trying to build a GUI application: a
+          # compiler, CMake and Ninja. Every Qt dependency and QMdmm itself must
+          # arrive through the dev package under test.
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            apt-get update
+            DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+              git ca-certificates build-essential cmake ninja-build dpkg-dev apt-utils
+          else
+            dnf install -y --setopt=install_weak_deps=False \
+              git ca-certificates gcc-c++ make cmake ninja-build createrepo_c
+          fi
+
+      - name: Checkout this harness
+        uses: actions/checkout@v4
+
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          name: packages-${{ matrix.dist.name }}
+          path: pkgs
+
+      - name: Publish the packages as a local repository
+        run: |
+          set -euxo pipefail
+          if [ '${{ matrix.dist.kind }}' = deb ]; then
+            cd pkgs
+            dpkg-scanpackages -m . > Packages
+            apt-ftparchive release . > Release
+            echo "deb [trusted=yes] file://$PWD ./" > /etc/apt/sources.list.d/qmdmm-local.list
+            cd ..
+            apt-get update
+          else
+            createrepo_c pkgs
+            printf '[qmdmm-local]\nname=QMdmm local\nbaseurl=file://%s/pkgs\nenabled=1\ngpgcheck=0\n' \
+              "$PWD" > /etc/yum.repos.d/qmdmm-local.repo
+            cat /etc/yum.repos.d/qmdmm-local.repo
+          fi
+
+      - name: Install the dev package and repair the dependency set (deb)
+        if: matrix.dist.kind == 'deb'
+        run: |
+          set -euxo pipefail
+          dev=$(awk -F'\t' -v s='${{ matrix.dist.sfx_dev }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "dev package: $dev"
+          # Installing the dev package by name only succeeds if it declares its
+          # own runtime, dev-common and Qt dependencies - which is the point.
+          apt-get install -y "$dev"
+          echo '::group::apt-get -f install (repair pass)'
+          apt-get -f install -y 2>&1 | tee /tmp/repair.log
+          echo '::endgroup::'
+          apt-get check
+          {
+            echo '### Dev install: what the repair pass had to add'
+            echo
+            echo '```'
+            grep -E '^(Inst|Conf|Remv|Removing|The following)' /tmp/repair.log \
+              || echo '(nothing: the declared dependencies were complete)'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the dev package and repair the dependency set (rpm)
+        if: matrix.dist.kind == 'rpm'
+        run: |
+          set -euxo pipefail
+          dev=$(awk -F'\t' -v s='${{ matrix.dist.sfx_dev }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "dev package: $dev"
+          dnf install -y "$dev"
+          if dnf check --dependencies > /tmp/dnfcheck.log 2>&1; then
+            echo 'dnf check: clean'
+          else
+            cat /tmp/dnfcheck.log
+            if grep -qE 'qmdmm|libQt6|qt6-' /tmp/dnfcheck.log; then
+              echo '::error::dnf reports unsatisfied dependencies for a QMdmm/Qt package'
+              exit 1
+            fi
+            echo '(dnf check reported unrelated issues; not caused by this package)'
+          fi
+          {
+            echo '### Dev install: dependency audit'
+            echo
+            echo '```'
+            cat /tmp/dnfcheck.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Report what the dev package dragged in
+        run: |
+          set -euxo pipefail
+          {
+            echo '### Everything present after installing only the dev package'
+            echo
+            echo '```'
+            if [ '${{ matrix.dist.kind }}' = deb ]; then
+              dpkg-query -W -f='${Package}\t${Version}\n' | sort
+            else
+              rpm -qa --qf '%{NAME}\t%{VERSION}\n' | sort
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch the QMdmm sources for the GUI and Bot
+        run: |
+          set -euxo pipefail
+          git init qmdmm-src
+          git -C qmdmm-src remote add origin "$QMDMM_REPO"
+          git -C qmdmm-src fetch --depth 1 origin '${{ inputs.qmdmm_ref }}'
+          git -C qmdmm-src checkout --detach FETCH_HEAD
+
+      - name: Build the consumer project against the installed package
+        run: |
+          set -euxo pipefail
+          cmake -S consumer -B consumer-build -G Ninja \
+            -DCMAKE_BUILD_TYPE='${{ inputs.build_type }}' \
+            -DQMDMM_SOURCE_DIR="$PWD/qmdmm-src" 2>&1 | tee /tmp/consumer-configure.log
+          cmake --build consumer-build --parallel
+
+      - name: Verify the executables the consumer produced
+        run: |
+          set -uo pipefail
+          failed=0
+          for exe in consumer-build/qmdmm-gui/QMdmm6 consumer-build/qmdmm-bot/QMdmmBot6; do
+            if [ -x "$exe" ]; then
+              echo "### built: $exe"
+              ldd "$exe" | tee /tmp/ldd.log
+              if grep -q 'not found' /tmp/ldd.log; then
+                echo "::error::$exe has unresolved shared libraries"
+                failed=1
+              fi
+            else
+              echo "::error::$exe was not produced"
+              failed=1
+            fi
+          done
+
+          export QT_QPA_PLATFORM=offscreen
+
+          timeout 20 consumer-build/qmdmm-gui/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
+          rc=$?
+          echo "### rebuilt GUI rc=$rc"
+          sed -e 's/^/  out| /' /tmp/gui.out
+          sed -e 's/^/  err| /' /tmp/gui.err
+          case "$rc" in
+            0|124) echo "  -> survived (rc=$rc)" ;;
+            *)     echo "::error::rebuilt GUI exited with rc=$rc"; failed=1 ;;
+          esac
+
+          timeout 10 consumer-build/qmdmm-bot/QMdmmBot6 >/tmp/bot.out 2>/tmp/bot.err
+          rc=$?
+          echo "### rebuilt Bot rc=$rc"
+          sed -e 's/^/  out| /' /tmp/bot.out
+          sed -e 's/^/  err| /' /tmp/bot.err
+          case "$rc" in
+            0|124) echo "  -> survived (rc=$rc)" ;;
+            *)     echo "::error::rebuilt Bot exited with rc=$rc"; failed=1 ;;
+          esac
+
+          [ "$failed" -eq 0 ]
+
+      - name: Write the summary
+        if: always()
+        run: |
+          {
+            echo '### What the consumer project proved'
+            echo
+            echo '`consumer/` links nothing but the installed package:'
+            echo '`find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)`,'
+            echo 'then QMdmm''s own QMdmmGui and QMdmmBot sources are added with'
+            echo '`add_subdirectory` and resolved against `QMdmm6::Core` and'
+            echo '`QMdmm6::Networking`. A green run means the dev package is'
+            echo 'sufficient to rebuild the GUI and the Bot.'
+            echo
+            echo '```'
+            grep -E 'QMdmm6_VERSION|QT_GENERATION|Qt6.*DIR' /tmp/consumer-configure.log | head -20 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
