@@ -3,9 +3,9 @@
 # Acceptance harness for the *installed* QMdmm dev package.
 #
 # Nothing in this project reaches into the QMdmm build tree for headers,
-# libraries or targets. The only thing it takes from the source tree is the GUI
-# and Bot sources themselves, so that "the dev package can build the GUI and the
-# Bot" is tested for real instead of being approximated by a toy program.
+# libraries or targets. The only thing it takes from the source tree is the GUI,
+# Bot and Server sources themselves, so that "the dev package can build them" is
+# tested for real instead of being approximated by a toy program.
 #
 # Configure it with:
 #
@@ -51,14 +51,14 @@ target_link_libraries(qmdmm_consumer_api_versionless PRIVATE
 )
 
 # ---------------------------------------------------------------------------
-# 3. The real acceptance test: QMdmm's own GUI and Bot.
+# 3. The real acceptance test: QMdmm's own GUI, Bot and Server.
 # ---------------------------------------------------------------------------
-# QMdmmGui and QMdmmBot are ordinary application directories whose CMakeLists
-# link the QMdmm6:: targets. Adding them here is only possible if the installed
-# package exports exactly the interface they expect, which makes them a much
-# harsher test than any hand-written consumer could be.
+# QMdmmGui, QMdmmBot and QMdmmServer are ordinary application directories whose
+# CMakeLists link the QMdmm6:: targets. Adding them here is only possible if the
+# installed package exports exactly the interface they expect, which makes them a
+# much harsher test than any hand-written consumer could be.
 #
-# Two things they take for granted are normally provided by QMdmm's own root
+# A few things they take for granted are normally provided by QMdmm's own root
 # CMakeLists, so they are supplied here:
 #   * Qt 6 itself (with the modules the GUI needs),
 #   * ${QMdmm_VERSION}, which QMdmm's project() call would have set - taken from
@@ -70,8 +70,22 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
     Qml Quick QuickWidgets
     LinguistTools
 )
+
+# QMdmm's own root calls this with the same REQUIRES, and QMdmmGui cannot be
+# built without it: qt6_add_qml_module() decides the resource prefix of a QML
+# module from the QTP0001 policy, which qt6_standard_project_setup() sets to NEW
+# for everything introduced up to 6.5. Under the policy's old default the QML
+# files land at qrc:/QMdmm/Gui/qml/..., while MainWindow hardcodes
+# qrc:/qt/qml/QMdmm/Gui/qml/main.qml - the GUI would link, start, and then show
+# nothing at all. Mirrored here rather than worked around, because this is
+# exactly what any downstream project that builds QMdmm's GUI has to do.
+qt6_standard_project_setup(REQUIRES 6.5)
 include(GNUInstallDirs)
 set(QMdmm_VERSION "${QMdmm6_VERSION}")
 
+# All three applications QMdmm ships, not just the GUI and the Bot: between them
+# they pull in every public header and every exported target, so "the dev package
+# is sufficient" is tested against the whole surface rather than a sample of it.
 add_subdirectory("${QMDMM_SOURCE_DIR}/QMdmmGui" qmdmm-gui)
 add_subdirectory("${QMDMM_SOURCE_DIR}/QMdmmBot" qmdmm-bot)
+add_subdirectory("${QMDMM_SOURCE_DIR}/QMdmmServer" qmdmm-server)

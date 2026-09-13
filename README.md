@@ -65,16 +65,19 @@ command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
 repair pass:
 
 * `find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)` succeeds.
-* QMdmm's own `QMdmmGui` and `QMdmmBot` directories build through
+* QMdmm's own `QMdmmGui`, `QMdmmBot` and `QMdmmServer` directories build through
   `add_subdirectory` against `QMdmm6::Core` / `QMdmm6::Networking`, producing
-  `QMdmm6` and `QMdmmBot6` executables.
-* Those executables have no unresolved libraries and survive under `offscreen`,
-  and the **rebuilt** Bot connects to the **installed** `QMdmmServer6` — so a
-  source build against the dev package demonstrably talks to the packaged runtime.
+  `QMdmm6`, `QMdmmBot6` and `QMdmmServer6` executables.
+* Those executables have no unresolved libraries, the GUI resolves its own QML
+  resources, and the **rebuilt** Bot connects to the **installed**
+  `QMdmmServer6` — so a source build against the dev package demonstrably talks
+  to the packaged runtime.
 
-The connection checks read `/proc/net/tcp` (port 6366 is `18DE`, `0A` is LISTEN,
-`01` is ESTABLISHED). If a container ever hides that file the harness warns and
-falls back to liveness rather than failing a sound package.
+The connection checks read `/proc/net/tcp` and `/proc/net/tcp6` (port 6366 is
+`18DE`, `0A` is LISTEN, `01` is ESTABLISHED). Both tables, because the server
+listens on `QHostAddress::Any`, which Qt maps to the dual-stack IPv6 wildcard, so
+its socket shows up in `tcp6`. If a container ever hides those files the harness
+warns and falls back to liveness rather than failing a sound package.
 
 The "minimal" half of "minimal but complete" is reported rather than enforced:
 the job summary records what the repair pass had to add, and what installing only
@@ -84,19 +87,26 @@ that list empty.
 ## `consumer/`
 
 The acceptance harness for stage C. It reaches into the QMdmm source tree for
-exactly one thing — the GUI and Bot sources — and takes everything else from the
+exactly one thing — the application sources — and takes everything else from the
 installed package:
 
 * `find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)`
 * `api-smoke.cpp` uses both include spellings (`<QMdmmPlayer>` and
   `<QMdmmCore/QMdmmPlayer>`) and both target spellings (`QMdmm6::Core` and the
   generation-free `QMdmm::Core`)
-* `add_subdirectory(<QMdmm>/QMdmmGui)` and `add_subdirectory(<QMdmm>/QMdmmBot)`
-  build the real applications
+* `add_subdirectory(<QMdmm>/QMdmmGui)`, `(<QMdmm>/QMdmmBot)` and
+  `(<QMdmm>/QMdmmServer)` build all three real applications
+* `qt6_standard_project_setup(REQUIRES 6.5)`, mirroring QMdmm's own root
 
 Building QMdmm's own application directories is a much harsher test than a
 hand-written consumer could be: it only works if the installed package exports
 exactly the interface QMdmm links against internally.
+
+That `qt6_standard_project_setup` line is not a workaround, it is part of what
+downstream projects have to do: `QMdmmGui/src/mainwindow.cpp` hardcodes
+`qrc:/qt/qml/QMdmm/Gui/qml/main.qml`, and where a QML module's resources end up
+is decided by the QTP0001 policy, which that call sets. Without it the rebuilt
+GUI links, starts, and then shows an empty window.
 
 ## Running it
 

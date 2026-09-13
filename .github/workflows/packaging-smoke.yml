@@ -620,7 +620,9 @@ jobs:
           set +e
           set -uo pipefail
           failed=0
-          for exe in consumer-build/qmdmm-gui/QMdmm6 consumer-build/qmdmm-bot/QMdmmBot6; do
+          for exe in consumer-build/qmdmm-gui/QMdmm6 \
+                     consumer-build/qmdmm-bot/QMdmmBot6 \
+                     consumer-build/qmdmm-server/QMdmmServer6; do
             if [ -x "$exe" ]; then
               echo "### built: $exe"
               ldd "$exe" | tee /tmp/ldd.log
@@ -662,6 +664,24 @@ jobs:
           sed -e 's/^/  err| /' /tmp/gui.err
           if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
             echo "::error::rebuilt GUI exited with rc=$rc"
+            failed=1
+          fi
+          # Linking and staying alive is not the whole story for this one: with
+          # the QML resource prefix wrong it does both of those and still shows an
+          # empty window, complaining only that its own qrc path is missing.
+          if grep -q 'No such file or directory' /tmp/gui.err; then
+            echo "::error::the rebuilt GUI could not resolve its QML out of its own resources"
+            failed=1
+          fi
+
+          # The rebuilt server on its own first, while 6366 is still free; the
+          # installed one below needs that port.
+          timeout 10 consumer-build/qmdmm-server/QMdmmServer6 >/tmp/rserver.out 2>/tmp/rserver.err
+          rc=$?
+          echo "### rebuilt Server rc=$rc"
+          sed -e 's/^/  err| /' /tmp/rserver.err
+          if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
+            echo "::error::rebuilt Server exited with rc=$rc"
             failed=1
           fi
 
@@ -732,15 +752,16 @@ jobs:
             echo
             echo '`consumer/` links nothing but the installed package:'
             echo '`find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)`,'
-            echo 'then QMdmm''s own QMdmmGui and QMdmmBot sources are added with'
-            echo '`add_subdirectory` and resolved against `QMdmm6::Core` and'
-            echo '`QMdmm6::Networking`. A green run means the dev package is'
-            echo 'sufficient to rebuild the GUI and the Bot.'
+            echo 'then QMdmm''s own QMdmmGui, QMdmmBot and QMdmmServer sources are'
+            echo 'added with `add_subdirectory` and resolved against `QMdmm6::Core`'
+            echo 'and `QMdmm6::Networking`. A green run means the dev package is'
+            echo 'sufficient to rebuild all three applications.'
             echo
-            echo 'The rebuilt Bot is also pointed at the installed `QMdmmServer6`'
-            echo '(the dev package drags the runtime in), and the server has to'
-            echo 'report the connection before the step passes - so a source build'
-            echo 'against the dev package really talks to the packaged runtime.'
+            echo 'The rebuilt GUI is checked for a resolved QML resource, not just'
+            echo 'for staying alive, and the rebuilt Bot is pointed at the installed'
+            echo '`QMdmmServer6` (the dev package drags the runtime in) and has to'
+            echo 'get through - so a source build against the dev package really'
+            echo 'talks to the packaged runtime.'
             echo
             echo '```'
             grep -E 'QMdmm6_VERSION|QT_GENERATION|Qt6.*DIR' /tmp/consumer-configure.log | head -20 || true
