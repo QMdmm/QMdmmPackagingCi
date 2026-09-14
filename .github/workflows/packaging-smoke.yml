@@ -17,9 +17,13 @@ name: Packaging smoke
 # development packages still installed, a missing runtime dependency would be
 # masked by them and "minimal but complete" could not be verified at all.
 #
+# It runs on a schedule as well as on demand: every day at 12:00 Asia/Shanghai
+# the suite re-verifies whatever `main` has become, so a packaging regression
+# is caught within a day instead of at the next release.
+#
 # The packages are installed from a local repository built out of the artifacts
 # rather than by file path: that is the only way the declared inter-component
-# dependencies (qmdmm-dev6 -> qmdmm-6 + qmdmm-dev-common) are actually resolved
+# dependencies (qmdmm-6-dev -> qmdmm-6 + qmdmm-common-dev) are actually resolved
 # instead of being sidestepped.
 
 on:
@@ -28,7 +32,7 @@ on:
       qmdmm_ref:
         description: 'QMdmm ref (branch, tag or commit) to package and verify'
         required: true
-        default: 'packaging-consumer-support'
+        default: 'main'
         type: string
       build_type:
         description: 'CMake build type'
@@ -39,12 +43,24 @@ on:
           - Release
           - MinSizeRel
           - Debug
+  schedule:
+    # 12:00 in Asia/Shanghai. GitHub's cron scheduler has no timezone setting
+    # and always reads UTC, so the offset is written into the field: 04:00 UTC
+    # is 12:00 at UTC+8. Scheduled runs have no inputs at all, which is what
+    # the QMDMM_REF / QMDMM_BUILD_TYPE defaults below exist for.
+    - cron: '0 4 * * *'
 
 permissions:
   contents: read
 
 env:
   QMDMM_REPO: https://github.com/Fsu0413/QMdmm.git
+  # A dispatched run takes these from its inputs; a scheduled run has no
+  # inputs at all, so both fall back to `main` - the branch the packaging
+  # support was merged into - and Release. The event test is there so the
+  # fallback does not depend on how an absent `inputs` object evaluates.
+  QMDMM_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.qmdmm_ref || 'main' }}
+  QMDMM_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type || 'Release' }}
   # Containers start with LANG unset, so Qt switches itself to C.UTF-8 and says
   # so on every launch. Setting it here keeps that noise out of the probe logs.
   LANG: C.UTF-8
@@ -124,7 +140,7 @@ jobs:
           set -euxo pipefail
           git init qmdmm-src
           git -C qmdmm-src remote add origin "$QMDMM_REPO"
-          git -C qmdmm-src fetch --depth 1 origin '${{ inputs.qmdmm_ref }}'
+          git -C qmdmm-src fetch --depth 1 origin '${{ env.QMDMM_REF }}'
           git -C qmdmm-src checkout --detach FETCH_HEAD
           echo "QMdmm HEAD: $(git -C qmdmm-src log --oneline -1)"
 
@@ -134,7 +150,7 @@ jobs:
           # /usr is where a distribution package installs: it decides both the
           # on-disk layout and the baked-in QMDMM_CONFIGURATION_PREFIX.
           cmake -S qmdmm-src -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE='${{ inputs.build_type }}' \
+            -DCMAKE_BUILD_TYPE='${{ env.QMDMM_BUILD_TYPE }}' \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DBUILD_TESTING=OFF \
             -DQMDMM_EXPORT_PRIVATE=NO
@@ -662,14 +678,14 @@ jobs:
           set -euxo pipefail
           git init qmdmm-src
           git -C qmdmm-src remote add origin "$QMDMM_REPO"
-          git -C qmdmm-src fetch --depth 1 origin '${{ inputs.qmdmm_ref }}'
+          git -C qmdmm-src fetch --depth 1 origin '${{ env.QMDMM_REF }}'
           git -C qmdmm-src checkout --detach FETCH_HEAD
 
       - name: Build the consumer project against the installed package
         run: |
           set -euxo pipefail
           cmake -S consumer -B consumer-build -G Ninja \
-            -DCMAKE_BUILD_TYPE='${{ inputs.build_type }}' \
+            -DCMAKE_BUILD_TYPE='${{ env.QMDMM_BUILD_TYPE }}' \
             -DQMDMM_SOURCE_DIR="$PWD/qmdmm-src" 2>&1 | tee /tmp/consumer-configure.log
           cmake --build consumer-build --parallel
 

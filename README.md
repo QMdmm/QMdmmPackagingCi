@@ -117,6 +117,15 @@ GUI links, starts, and then shows an empty window.
 
 ## Running it
 
+Daily, on a schedule: at **12:00 Asia/Shanghai** the whole suite re-runs against
+`main` and `Release`, so a packaging regression surfaces within a day rather
+than at the next release. The `cron` field reads `0 4 * * *`: GitHub's scheduler
+has no timezone setting and always reads UTC, and 04:00 UTC is 12:00 at UTC+8.
+
+A scheduled run has no inputs at all, so the ref and the build type come from
+the `QMDMM_REF` / `QMDMM_BUILD_TYPE` defaults in `env` — which is also why those
+two are `env` entries rather than `inputs` read directly at the point of use.
+
 Manually:
 
 ```
@@ -124,10 +133,10 @@ gh workflow run packaging-smoke.yml -f qmdmm_ref=<branch|tag|commit>
 gh run watch
 ```
 
-Inputs:
+Inputs (dispatched runs only):
 
-* `qmdmm_ref` — the QMdmm ref to package and verify. Defaults to
-  `packaging-consumer-support`, the branch that adds the exported CMake package.
+* `qmdmm_ref` — the QMdmm ref to package and verify. Defaults to `main`, which
+  the packaging work (`packaging-consumer-support`) was merged into.
 * `build_type` — CMake build type, default `Release`.
 
 Images: `debian:sid` and `fedora:latest` (the rolling pointers). Pinning per
