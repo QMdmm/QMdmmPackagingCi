@@ -230,7 +230,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload packages
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: packages-${{ matrix.dist.name }}
           path: out
@@ -297,7 +297,7 @@ jobs:
           command -v ldd
 
       - name: Download packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: packages-${{ matrix.dist.name }}
           path: pkgs
@@ -439,6 +439,15 @@ jobs:
           fi
           if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' /tmp/gui.err; then
             echo "::error::QMdmm6 has a dynamic loading failure"
+            failed=1
+          fi
+          # Staying alive is not the whole story for a GUI: with the QML resource
+          # prefix wrong it does exactly that and still shows an empty window,
+          # complaining only that its own qrc path is missing. Same assertion as
+          # the rebuilt GUI in stage C - the packaged GUI has to resolve its QML
+          # out of its own resources, not out of the build tree.
+          if grep -q 'No such file or directory' /tmp/gui.err; then
+            echo "::error::the installed GUI could not resolve its QML out of its own resources"
             failed=1
           fi
 
@@ -586,10 +595,10 @@ jobs:
           fi
 
       - name: Checkout this harness
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Download packages
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: packages-${{ matrix.dist.name }}
           path: pkgs
