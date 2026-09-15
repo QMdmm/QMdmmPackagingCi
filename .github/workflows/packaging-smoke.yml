@@ -17,9 +17,10 @@ name: Packaging smoke
 # development packages still installed, a missing runtime dependency would be
 # masked by them and "minimal but complete" could not be verified at all.
 #
-# It runs on a schedule as well as on demand: every day at 12:00 Asia/Shanghai
+# It runs on a schedule as well as on demand: every day at 08:00 Asia/Shanghai
 # the suite re-verifies whatever `main` has become, so a packaging regression
-# is caught within a day instead of at the next release.
+# is caught within a day instead of at the next release. The hour is an
+# experiment, not a preference - see the note on the schedule below.
 #
 # The packages are installed from a local repository built out of the artifacts
 # rather than by file path: that is the only way the declared inter-component
@@ -44,11 +45,22 @@ on:
           - MinSizeRel
           - Debug
   schedule:
-    # 12:00 in Asia/Shanghai. GitHub's cron scheduler has no timezone setting
-    # and always reads UTC, so the offset is written into the field: 04:00 UTC
-    # is 12:00 at UTC+8. Scheduled runs have no inputs at all, which is what
+    # 08:00 in Asia/Shanghai. GitHub's cron scheduler has no timezone setting
+    # and always reads UTC, so the offset is written into the field: 00:00 UTC
+    # is 08:00 at UTC+8. Scheduled runs have no inputs at all, which is what
     # the QMDMM_REF / QMDMM_BUILD_TYPE defaults below exist for.
-    - cron: '0 4 * * *'
+    #
+    # This read 04:00 UTC (12:00 UTC+8) until 2026-09-15. The first two
+    # scheduled runs started at 09:41:11Z and 09:16:57Z - 5h41m and 5h17m
+    # after the trigger, with created_at == run_started_at, so they were
+    # started late rather than queued behind a punctual one. The repository
+    # had already been checked for anything that could explain it (Actions
+    # enabled, workflow active, default branch main, public, not a fork).
+    # Moving the trigger earlier is the experiment: if the offset hangs off
+    # the cron, runs should land near 05:00 UTC; if they keep landing near
+    # 09:20 UTC whatever the field says, the field is not the cause and this
+    # should go back to 04:00 UTC.
+    - cron: '0 0 * * *'
 
 permissions:
   contents: read
