@@ -1,0 +1,38 @@
+# Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
+# QMdmm —— Qt6 单包（Fs 09-16 拍板：qmdmm-6，不拆 dev；头与 CMake config 随主包）
+pkgname=qmdmm-6
+pkgver=0.0.1
+pkgrel=1
+pkgdesc="A game which is played in primary / high school (Qt6 build)"
+arch=(x86_64)
+url="https://github.com/Fsu0413/QMdmm"
+license=('AGPL-3.0-or-later')
+depends=(
+  qt6-base         # Core / Gui / Network / Widgets 运行时
+  qt6-declarative  # Qml / Quick / QuickWidgets + QML 运行时模块（Arch 不另拆包）
+  qt6-websockets
+)
+makedepends=(cmake ninja qt6-tools)  # qt6-tools 提供 Qt6LinguistTools（lrelease）
+# 本地源码 tarball：git archive d0f89c9（origin/main @ 09-16），不走 codeload
+source=("qmdmm-6-${pkgver}.tar.gz")
+sha256sums=('355e0cba7d4b8b33c93e2418b36f9af3a3144d8e7d4b24adba8d317db56a91b5')
+options=(!debug !lto)
+
+prepare() {
+  cd "$pkgname-$pkgver"
+  cmake -S . -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DBUILD_SHARED_LIBS=ON
+}
+
+build() {
+  cd "$pkgname-$pkgver"
+  cmake --build build
+}
+
+package() {
+  cd "$pkgname-$pkgver"
+  DESTDIR="$pkgdir" cmake --install build
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}
