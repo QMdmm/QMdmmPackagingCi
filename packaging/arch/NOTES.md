@@ -1,10 +1,12 @@
 # Arch packaging recipe (qmdmm-6)
 
-Proven end-to-end on 2026-09-16: `makepkg` built `qmdmm-6-0.0.1-1-x86_64.pkg.tar.zst`
-in one pass; `pacman -U` resolved real dependencies (qt6-websockets had been removed
-first, and pacman pulled it back from the repo with no `--nodeps`/`--force`);
-ldd clean for all three binaries; offscreen smoke survived the 20s timeout; in-repo
-`smoke` test exited 0. Full write-up with pitfalls: `nemn9852/qmdmm-maintenance#19`.
+Verified end-to-end 2026-09-16. `makepkg` built `qmdmm-6-0.0.1-1-x86_64.pkg.tar.zst`
+in one pass. Dependency metadata was then proven by *real resolution*: `qt6-websockets`
+was removed from the system, and a plain `pacman -U` of the local package (no
+`--nodeps`/`--force`) resolved and reinstalled it from the repo alongside `qmdmm-6`.
+Afterwards ldd was clean for all three binaries, the GUI survived a 20s offscreen
+timeout, and the in-repo `smoke` test exited 0. Full write-up with pitfalls:
+`nemn9852/qmdmm-maintenance#19`.
 
 Single-package form (`qmdmm-6`, version `0.0.1`, no split `-dev`) per Fs's call:
 headers and `/usr/lib/cmake/QMdmm6/QMdmm6Config.cmake` ship in the main package.
@@ -14,14 +16,11 @@ Arch has no component-split mechanism like CPack's, so this is the natural shape
 
 - `PKGBUILD` — the exact file used for the verified build (byte-for-byte).
 - `.SRCINFO` — generated with `makepkg --printsrcinfo`, not hand-written.
-- `archroot` — proot entry wrapper, only needed on a **rootless host** (e.g. running
-  the Arch build inside a Debian user account). On a real Arch box, skip it.
 
 ## Source tarball
 
 `source=` points to a local `qmdmm-6-0.0.1.tar.gz` (not committed here — this repo
-keeps no binaries). It is produced from the QMdmm git tree, **not** a codeload
-download:
+keeps no binaries). Produce it from the QMdmm git tree, **not** a codeload download:
 
 ```bash
 git clone https://github.com/Fsu0413/QMdmm && cd QMdmm
@@ -31,20 +30,31 @@ git archive --format=tar.gz --prefix=qmdmm-6-0.0.1/ d0f89c92a7299d6315c1c779584d
 ```
 
 Commit `d0f89c9` = `origin/main` at 2026-09-16. Put the tarball next to the PKGBUILD,
-then `makepkg -f`.
+then `makepkg -f`. The PKGBUILD's `sha256sums` pins the hash, so a regenerated tarball
+that doesn't match is caught at validation.
 
 ## Build notes
 
-- `makepkg` **refuses to run as root**. On any host/container that defaults to root
-  (GitHub Actions container jobs included), create a non-root user and `su` into it.
-- Rootless proot route: bootstrap `archlinux-bootstrap-2026.09.01-x86_64.tar.zst`
-  from `geo.mirror.pkgbuild.com/images/latest/` into a directory, then use
-  `archroot -u … makepkg -f --noconfirm`. Two wrapper quirks matter:
-  pseudo-root mode (`-S`) binds host `/etc` + `$HOME` into the guest, which can
-  hijack `makepkg.conf`, so builds use the `-u` mode with **explicit** binds
-  (`/dev /proc /sys` + build dir only, `HOME` pinned to the guest user); and set
-  `LANG=C.UTF8` so the host locale never leaks into pacman tooling.
-- `check()` is intentionally absent here: the verified run configured with makepkg
-  defaults (`BUILD_TESTING` off), so `ctest` had nothing registered. If you wire this
-  into CI, pass `-DBUILD_TESTING=ON` and add a `check()` target running
-  `tst_qmdmm_smoke6` (see #19 "CI 化方案").
+- `makepkg` **refuses to run as root**. GitHub Actions container jobs execute every
+  step as root, so a CI recipe must create a non-root user and run the build as it,
+  e.g.:
+
+  ```bash
+  useradd -m -G wheel builder
+  pacman -S --noconfirm --needed sudo
+  printf '%%wheel ALL=(ALL) NOPASSWD: ALL\n' > /etc/sudoers.d/wheel
+  install -o builder -g builder -m 644 PKGBUILD .SRCINFO /home/builder/pkg/
+  install -o builder -g builder -m 644 qmdmm-6-0.0.1.tar.gz /home/builder/pkg/
+  su builder -c 'cd ~/pkg && makepkg -f --noconfirm'
+  ```
+
+  Package *installation* (stage B style, `pacman -U`) goes back to root — that is fine.
+- Runtime deps: `qt6-base` (Core/Gui/Network/WebSockets/Widgets), `qt6-declarative`
+  (Qml/Quick/QuickWidgets — Arch keeps QML runtime modules inside it, there is no
+  `qml6-module-*` split like Debian's), `qt6-websockets`. Make deps: `cmake`, `ninja`,
+  `qt6-tools` (provides `Qt6LinguistTools` / `lrelease`). Each package's file→name
+  mapping must be verified in the target distro, not copied from another line's list.
+- `options=(!debug !lto)` overrides Arch defaults (both are on by default).
+- `check()` is intentionally absent: the verified run configured with makepkg defaults
+  (`BUILD_TESTING` off), so `ctest` had nothing registered. When wiring into CI, pass
+  `-DBUILD_TESTING=ON` and add a `check()` that runs `tst_qmdmm_smoke6` via ctest.
