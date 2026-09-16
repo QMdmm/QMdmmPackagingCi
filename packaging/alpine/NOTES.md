@@ -45,24 +45,31 @@ that doesn't match (e.g. from a different git version or prefix).
 ## Build notes
 
 - **`abuild` refuses to run as root** (uid 0 without a fakeroot key aborts).
-  Container jobs run every step as root, so create a non-root builder first:
+  Container jobs run every step as root, so build as a non-root user. The
+  `abuild` *package* already creates the `abuild` group (gid **300**) on
+  install — do **not** create it yourself and do **not** pin a gid:
 
   ```bash
-  addgroup -g 100 abuild
-  adduser -D -u 100 -G abuild -h /home/builder builder
-  apk add --no-cache sudo
-  printf '%s\n' '%wheel ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/wheel  # add builder to wheel
-  su builder -c 'abuild-keygen -a -n && abuild -r'
+  apk add --no-cache abuild fakeroot scanelf      # group abuild (gid 300) comes with it
+  adduser -D -G abuild builder
+  id builder                                      # → uid=1000(builder) gid=300(abuild)
+  su - builder -c 'abuild-keygen -a -n && abuild -r'
   ```
 
-  The sudo setup is what lets `abuild -r` auto-install `makedepends` (via
-  `abuild-apk`); keep it, and **do not add `-d`**. (`-d` skips that dependency
-  resolution entirely — it would silently delete the very thing CI must verify.
-  The verified local run used `-d` only because its tooling couldn't execute
-  the setuid `abuild-sudo` helper; that constraint does not exist in containers.
-  The original host was a no-root Debian box driving the rootfs through a
-  translation layer — the `-i 100:100` / `HOME=/root` / `-d` details in #20
-  belong to *that* environment and must not be copied into a container recipe.)
+  How `abuild -r` then auto-installs `makedepends` without any sudo: it shells
+  out to `abuild-apk`, which is a symlink to the **setuid** binary
+  `/usr/bin/abuild-sudo`; that helper authorizes the caller purely by
+  **membership in the `abuild` group** (its check string is literally
+  `User %s is not a member of group %s`). No wheel group, no NOPASSWD
+  sudoers — and **keep `-d` off** for the same reason as before: `-d` skips
+  that makedepends resolution entirely, silently deleting the very thing CI
+  must verify. (The verified local run in #20 used `-d` only because its
+  host-side tooling — proot, no setuid emulation — couldn't execute
+  `abuild-sudo`; that constraint does not exist in containers, so do not copy
+  the `-d` / `-i 100:100` / `HOME=/root` details from there.)
+  One caveat if you use plain `su builder` (no dash): HOME stays the root
+  shell's, so `abuild-keygen` writes into `/root/.abuild` and the later
+  signing step fails to read `PACKAGER_PRIVKEY` — prefer `su -` as above.
 - **`cmake -G "Unix Makefiles"` is deliberate.** Alpine's cmake defaults to
   Ninja, but its `ninja-build` package installs the binary to
   `/usr/lib/ninja-build/bin/ninja` — off PATH — so Ninja fails to find a make
