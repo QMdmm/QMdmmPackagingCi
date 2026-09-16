@@ -59,6 +59,14 @@ package and running the repair command (`apt-get -f install` on Debian, an idemp
   and shared library.
 * `QT_QPA_PLATFORM=offscreen timeout 20 QMdmm6` is still running when the timeout
   fires (`rc` 124), i.e. the GUI really starts and does not fall over.
+* The installed `QMdmm6` carries its QML at `qrc:/qt/qml/QMdmm/Gui/qml` — the
+  path `QMdmmGui/src/mainwindow.cpp` asks the resource system for. Staying alive
+  is not enough of a proof on its own: with the resource prefix wrong the GUI
+  does exactly that and shows an empty window, and the warning it prints in that
+  case is not something every distribution puts on stderr. The check reads the
+  binary instead (`strings -e l`: Qt stores these paths as UTF-16, so a plain
+  grep finds nothing), which makes it hold everywhere, whatever the runtime
+  happens to log.
 * `QMdmmServer6` starts and stays up — it calls `qFatal()` when it cannot bind
   its sockets, so surviving is only possible if it listened.
 * `QMdmmBot6 --host=qmdmm://localhost:6366` stays up **and** the server reports the
@@ -76,9 +84,11 @@ by name and running the same repair pass:
   `add_subdirectory` against `QMdmm6::Core` / `QMdmm6::Networking`, producing
   `QMdmm6`, `QMdmmBot6` and `QMdmmServer6` executables.
 * Those executables have no unresolved libraries, the GUI resolves its own QML
-  resources, and the **rebuilt** Bot connects to the **installed**
-  `QMdmmServer6` — so a source build against the dev package demonstrably talks
-  to the packaged runtime.
+  resources — read statically out of the rebuilt binary, with the same check as
+  stage B, because here the prefix is decided by the consumer's own
+  `qt6_standard_project_setup` — and the **rebuilt** Bot connects to the
+  **installed** `QMdmmServer6` — so a source build against the dev package
+  demonstrably talks to the packaged runtime.
 
 The connection checks read `/proc/net/tcp` and `/proc/net/tcp6` (port 6366 is
 `18DE`, `0A` is LISTEN, `01` is ESTABLISHED). Both tables, because the server
