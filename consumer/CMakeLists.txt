@@ -10,7 +10,7 @@
 # Configure it with:
 #
 #   cmake -S consumer -B build -G Ninja \
-#       -DQMDMM_SOURCE_DIR=<checkout of Fsu0413/QMdmm>
+#       -DQMDMM_SOURCE_DIR=<checkout of QMdmm/QMdmm>
 
 cmake_minimum_required(VERSION 3.19)
 
@@ -20,7 +20,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED true)
 
 if (NOT DEFINED QMDMM_SOURCE_DIR)
-    message(FATAL_ERROR "Pass -DQMDMM_SOURCE_DIR=<checkout of Fsu0413/QMdmm>")
+    message(FATAL_ERROR "Pass -DQMDMM_SOURCE_DIR=<checkout of QMdmm/QMdmm>")
 endif()
 
 # ---------------------------------------------------------------------------

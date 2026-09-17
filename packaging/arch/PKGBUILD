@@ -5,7 +5,7 @@ pkgver=0.0.1
 pkgrel=1
 pkgdesc="A game which is played in primary / high school (Qt6 build)"
 arch=(x86_64)
-url="https://github.com/Fsu0413/QMdmm"
+url="https://github.com/QMdmm/QMdmm"
 license=('AGPL-3.0-or-later')
 depends=(
   qt6-base         # Core / Gui / Network / Widgets 运行时

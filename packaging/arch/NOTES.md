@@ -23,7 +23,7 @@ Arch has no component-split mechanism like CPack's, so this is the natural shape
 keeps no binaries). Produce it from the QMdmm git tree, **not** a codeload download:
 
 ```bash
-git clone https://github.com/Fsu0413/QMdmm && cd QMdmm
+git clone https://github.com/QMdmm/QMdmm && cd QMdmm
 git archive --format=tar.gz --prefix=qmdmm-6-0.0.1/ d0f89c92a7299d6315c1c779584dfe52b21dc4d8 \
   -o qmdmm-6-0.0.1.tar.gz
 # sha256: 355e0cba7d4b8b33c93e2418b36f9af3a3144d8e7d4b24adba8d317db56a91b5

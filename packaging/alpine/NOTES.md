@@ -18,7 +18,7 @@ write-up with the pitfall table: `nemn9852/qmdmm-maintenance#20`.
 keeps no binaries). Produce it from the QMdmm git tree, **not** a codeload download:
 
 ```bash
-git clone https://github.com/Fsu0413/QMdmm && cd QMdmm
+git clone https://github.com/QMdmm/QMdmm && cd QMdmm
 git archive --format=tar.gz --prefix=qmdmm-0.0.1/ d0f89c92a7299d6315c1c779584dfe52b21dc4d8 \
   -o qmdmm-0.0.1.tar.gz
 # sha512: 9cf64de80234d42f969fdaebf762f9fe79980714725d99d94614a9de3f6ae09

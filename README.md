@@ -1,6 +1,6 @@
-# qmdmm-packaging-ci
+# QMdmmPackagingCi
 
-Container-based packaging verification for [Fsu0413/QMdmm](https://github.com/Fsu0413/QMdmm).
+Container-based packaging verification for [QMdmm/QMdmm](https://github.com/QMdmm/QMdmm).
 
 This repository holds no product code. It exists to answer three questions about
 every distribution QMdmm claims to support, using that distribution's own
