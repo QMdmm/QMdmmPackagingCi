@@ -157,3 +157,20 @@ Inputs (dispatched runs only):
 Images: `debian:sid` and `fedora:latest` (the rolling pointers). Pinning per
 release and adding `fedora:rawhide` as a non-blocking weekly run is left for a
 later pass, once the manual flow is stable.
+
+## TODO
+
+**A Qt version matrix** is wanted here, as its own workflow file rather than a
+fourth stage in `packaging-smoke.yml` — it answers a different question. QMdmm
+declares `Qt ≥ 6.5`, but nothing has ever built against that floor: QMdmm's own CI
+uses Ubuntu 26.04 and takes Qt from the distribution (6.10.2), so the declared
+minimum and the newest LTS have both gone untested. The check would build QMdmm's
+own sources and run `ctest` once per LTS — **6.5, 6.8, 6.11**, since every Qt 6
+release after 6.5 other than those is EOL — with a daily `on.schedule`.
+
+Living in a separate file has two consequences worth stating up front: it inherits
+nothing from `packaging-smoke.yml`, so its schedule has to be declared again
+rather than assumed; and Qt has to come from `install-qt-action`, because no
+runner image supplies these versions — Ubuntu 24.04 ships Qt 6.4.2, below the
+floor, and 26.04 ships 6.10.2. Suggested runners: 24.04 for 6.5 and 6.8, 26.04 for
+6.11.
