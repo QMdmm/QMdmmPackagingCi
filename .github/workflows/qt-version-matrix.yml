@@ -1,0 +1,111 @@
+name: Qt version matrix
+
+# Builds QMdmm's own sources and runs its test suite once per Qt LTS.
+#
+# QMdmm declares Qt >= 6.5, but nothing has ever built against that floor:
+# QMdmm's own CI takes Qt from the distribution - 6.10.2 on Ubuntu 26.04 - so
+# both the declared minimum and the newest LTS have gone untested. The packaging
+# workflow cannot answer this question either: it verifies what a distribution
+# ships, not what the sources need.
+#
+# This is its own file rather than a fourth stage in packaging-smoke.yml because
+# it asks a different question. Two consequences are visible below: nothing is
+# inherited from that workflow, its schedule included, and Qt has to come from
+# install-qt-action because no runner image supplies these versions (Ubuntu
+# 24.04 ships 6.4.2, below the declared floor, and 26.04 ships 6.10.2).
+#
+# The versions are the Qt 6 LTS releases that are still supported at all: 6.5,
+# 6.8 and 6.11. Every other Qt 6 release has reached end of life. Runners split
+# the same way - 24.04 for the two older lines, 26.04 for 6.11 - so each Qt
+# release is built on a distribution of its own generation rather than ahead of
+# it.
+
+on:
+  workflow_dispatch:
+    inputs:
+      qmdmm_ref:
+        description: 'QMdmm ref (branch, tag or commit) to build and test'
+        required: true
+        default: 'main'
+        type: string
+  schedule:
+    # Daily, so a Qt incompatibility surfaces within a day instead of at the next
+    # release. As in packaging-smoke.yml, the cron field is a dial rather than a
+    # promise of a clock time: GitHub's scheduler has no timezone setting and
+    # starts scheduled runs hours after the value it was given. The two files are
+    # scheduled independently - the drift measured there does not transfer here.
+    - cron: '0 0 * * *'
+
+permissions:
+  contents: read
+
+env:
+  # A dispatched run takes the ref from its input; a scheduled run has no inputs
+  # at all, so it falls back to `main`. The event test is there so the fallback
+  # does not depend on how an absent `inputs` object evaluates.
+  QMDMM_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.qmdmm_ref || 'main' }}
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    name: "Qt ${{ matrix.qt }} (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            qt: '6.5.*'
+          - os: ubuntu-24.04
+            qt: '6.8.*'
+          - os: ubuntu-26.04
+            qt: '6.11.*'
+
+    steps:
+      - name: Set timezone
+        run: |
+          sudo ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+          date
+
+      - name: Checkout QMdmm
+        uses: actions/checkout@v7
+        with:
+          repository: QMdmm/QMdmm
+          ref: ${{ env.QMDMM_REF }}
+          path: qmdmm-src
+
+      - name: Install Qt ${{ matrix.qt }}
+        uses: jurplel/install-qt-action@v4
+        with:
+          # A simple-spec range, so the newest patch release of the line is what
+          # gets installed and a patch release does not need a commit here.
+          version: ${{ matrix.qt }}
+          # Qt WebSockets is an add-on module rather than part of the base
+          # archives, and QMdmmNetworking links against it. Everything else the
+          # project asks for (Core, Gui, Widgets, Network, Qml, Quick,
+          # QuickWidgets, Test, QuickTest, LinguistTools) is in the archives the
+          # action installs by default.
+          modules: 'qtwebsockets'
+
+      - name: Report the Qt version in use
+        run: |
+          # Which patch release the range resolved to is part of what a run
+          # records, so it is printed rather than left to be inferred.
+          qmake6 -v || qmake -v
+
+      - name: Configure
+        run: |
+          cmake -S qmdmm-src -B build -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=ON \
+            -DQMDMM_EXPORT_PRIVATE=NO \
+            -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
