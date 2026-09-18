@@ -161,17 +161,20 @@ later pass, once the manual flow is stable.
 ## Qt version matrix
 
 `qt-version-matrix.yml` asks a question the packaging stages cannot: QMdmm
-declares `Qt ≥ 6.5`, but its own CI takes Qt from the distribution (6.10.2 on
-Ubuntu 26.04), so the declared floor and the newest LTS had both gone untested.
-The workflow builds QMdmm's own sources and runs `ctest` once per Qt LTS that is
-still supported — **6.5, 6.8, 6.11**; every other Qt 6 release has reached end of
-life — daily and on demand.
+declares `Qt ≥ 6.7`, but its own CI takes Qt from the distribution (6.10.2 on
+Ubuntu 26.04), so every release between the declared floor and that one had gone
+untested. The workflow builds QMdmm's own sources and runs `ctest` once per Qt
+LTS that is both still supported and at or above the floor — **6.8 and 6.11**;
+every other Qt 6 release has reached end of life — daily and on demand. 6.5 is
+not in the matrix: its configure failure comes from Qt's own helper (qtbase
+`721cfbd1`, picked to 6.7), so the floor was raised past it rather than worked
+around.
 
 It is a separate file rather than a fourth packaging stage, and it inherits
 nothing from `packaging-smoke.yml`: its `cron` is declared in its own file rather
 than assumed, and Qt comes from `install-qt-action`, because no runner image
 supplies these versions — Ubuntu 24.04 ships Qt 6.4.2, below the floor, and 26.04
-ships 6.10.2. The runners split the same way: 24.04 for 6.5 and 6.8, 26.04 for
+ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for
 6.11.
 
 ```

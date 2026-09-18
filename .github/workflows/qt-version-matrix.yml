@@ -2,11 +2,11 @@ name: Qt version matrix
 
 # Builds QMdmm's own sources and runs its test suite once per Qt LTS.
 #
-# QMdmm declares Qt >= 6.5, but nothing has ever built against that floor:
-# QMdmm's own CI takes Qt from the distribution - 6.10.2 on Ubuntu 26.04 - so
-# both the declared minimum and the newest LTS have gone untested. The packaging
-# workflow cannot answer this question either: it verifies what a distribution
-# ships, not what the sources need.
+# QMdmm declares Qt >= 6.7, but its own CI only ever builds the Qt a distribution
+# ships - 6.10.2 on Ubuntu 26.04 - so any release between the declared minimum
+# and that one has gone untested. The packaging workflow cannot answer this
+# question either: it verifies what a distribution ships, not what the sources
+# need.
 #
 # This is its own file rather than a fourth stage in packaging-smoke.yml because
 # it asks a different question. Two consequences are visible below: nothing is
@@ -14,11 +14,13 @@ name: Qt version matrix
 # install-qt-action because no runner image supplies these versions (Ubuntu
 # 24.04 ships 6.4.2, below the declared floor, and 26.04 ships 6.10.2).
 #
-# The versions are the Qt 6 LTS releases that are still supported at all: 6.5,
-# 6.8 and 6.11. Every other Qt 6 release has reached end of life. Runners split
-# the same way - 24.04 for the two older lines, 26.04 for 6.11 - so each Qt
-# release is built on a distribution of its own generation rather than ahead of
-# it.
+# The versions are the Qt 6 LTS releases that are both still supported at all
+# and at or above QMdmm's floor: 6.8 and 6.11. 6.5 is not among them - its
+# configure failure comes from Qt's own helper, fixed in qtbase 721cfbd1 (picked
+# to 6.7), not from these sources. Every other Qt 6 release has reached end of
+# life. Runners split along the same lines - 24.04 for 6.8, 26.04 for 6.11 - so
+# each Qt release is built on a distribution of its own generation rather than
+# ahead of it.
 
 on:
   workflow_dispatch:
@@ -57,8 +59,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-24.04
-            qt: '6.5.*'
           - os: ubuntu-24.04
             qt: '6.8.*'
           - os: ubuntu-26.04
