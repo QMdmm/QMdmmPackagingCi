@@ -127,10 +127,15 @@ GUI links, starts, and then shows an empty window.
 
 ## Running it
 
-Daily, on a schedule: at **12:00 Asia/Shanghai** the whole suite re-runs against
-`main` and `Release`, so a packaging regression surfaces within a day rather
-than at the next release. The `cron` field reads `0 4 * * *`: GitHub's scheduler
-has no timezone setting and always reads UTC, and 04:00 UTC is 12:00 at UTC+8.
+Daily, on a schedule: the whole suite re-runs against `main` and `Release`, so a
+packaging regression surfaces within a day rather than at the next release. The
+`cron` field reads `0 0 * * *`, but the field is not when the runs start:
+GitHub's scheduler has no timezone setting and launches scheduled runs hours
+after the trigger it was given. That lateness is stable per cron value but not
+derivable from it (four runs measured: 3h20m to 5h41m late), so the field is
+treated as a dial that gets nudged when the drift shifts, not as a promise of a
+clock time. The four runs are recorded in the note on the schedule in the
+workflow.
 
 A scheduled run has no inputs at all, so the ref and the build type come from
 the `QMDMM_REF` / `QMDMM_BUILD_TYPE` defaults in `env` — which is also why those

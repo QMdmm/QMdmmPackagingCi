@@ -17,10 +17,10 @@ name: Packaging smoke
 # development packages still installed, a missing runtime dependency would be
 # masked by them and "minimal but complete" could not be verified at all.
 #
-# It runs on a schedule as well as on demand: every day at 08:00 Asia/Shanghai
-# the suite re-verifies whatever `main` has become, so a packaging regression
-# is caught within a day instead of at the next release. The hour is an
-# experiment, not a preference - see the note on the schedule below.
+# It runs on a schedule as well as on demand: every day the suite re-verifies
+# whatever `main` has become, so a packaging regression is caught within a day
+# instead of at the next release. The cron field is a dial, not a promise of a
+# clock time - see the note on the schedule below.
 #
 # The packages are installed from a local repository built out of the artifacts
 # rather than by file path: that is the only way the declared inter-component
@@ -45,21 +45,26 @@ on:
           - MinSizeRel
           - Debug
   schedule:
-    # 08:00 in Asia/Shanghai. GitHub's cron scheduler has no timezone setting
-    # and always reads UTC, so the offset is written into the field: 00:00 UTC
-    # is 08:00 at UTC+8. Scheduled runs have no inputs at all, which is what
-    # the QMDMM_REF / QMDMM_BUILD_TYPE defaults below exist for.
+    # GitHub's cron scheduler has no timezone setting and always reads UTC, so
+    # the intended hour is written into the field as 00:00 UTC (08:00 UTC+8).
+    # Scheduled runs have no inputs at all, which is what the QMDMM_REF /
+    # QMDMM_BUILD_TYPE defaults below exist for.
     #
-    # This read 04:00 UTC (12:00 UTC+8) until 2026-09-15. The first two
-    # scheduled runs started at 09:41:11Z and 09:16:57Z - 5h41m and 5h17m
-    # after the trigger, with created_at == run_started_at, so they were
-    # started late rather than queued behind a punctual one. The repository
-    # had already been checked for anything that could explain it (Actions
-    # enabled, workflow active, default branch main, public, not a fork).
-    # Moving the trigger earlier is the experiment: if the offset hangs off
-    # the cron, runs should land near 05:00 UTC; if they keep landing near
-    # 09:20 UTC whatever the field says, the field is not the cause and this
-    # should go back to 04:00 UTC.
+    # Runs do not start at the field's hour. Measured over four scheduled runs,
+    # all with created_at == run_started_at (started late, not queued):
+    #
+    #   '0 4 * * *'   09-14 09:41:11Z   +5h41m11s
+    #                 09-15 09:16:57Z   +5h16m57s
+    #   '0 0 * * *'   09-16 03:20:00Z   +3h20m00s
+    #                 09-17 03:25:48Z   +3h25m48s
+    #
+    # The repository was checked for anything that could explain it (Actions
+    # enabled, workflow active, default branch main, public, not a fork). The
+    # offset turns out to hang off the cron value: moving the trigger earlier
+    # moved the landing time ~2h15m earlier, and two runs on the same value
+    # landed 5m48s apart. The field is therefore a dial - if runs keep drifting
+    # later, move it an hour earlier to compensate - and not a promise of a
+    # clock time. No further field experiments are being run.
     - cron: '0 0 * * *'
 
 permissions:
