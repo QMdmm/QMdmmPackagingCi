@@ -64,7 +64,7 @@ target_link_libraries(qmdmm_consumer_api_versionless PRIVATE
 #   * ${QMdmm_VERSION}, which QMdmm's project() call would have set - taken from
 #     the version the package reports, so it cannot drift,
 #   * GNUInstallDirs, for ${CMAKE_INSTALL_BINDIR}.
-find_package(Qt6 6.5 REQUIRED COMPONENTS
+find_package(Qt6 6.7 REQUIRED COMPONENTS
     Core Gui Widgets
     Network WebSockets
     Qml Quick QuickWidgets
@@ -74,12 +74,12 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS
 # QMdmm's own root calls this with the same REQUIRES, and QMdmmGui cannot be
 # built without it: qt6_add_qml_module() decides the resource prefix of a QML
 # module from the QTP0001 policy, which qt6_standard_project_setup() sets to NEW
-# for everything introduced up to 6.5. Under the policy's old default the QML
+# for everything introduced up to 6.7. Under the policy's old default the QML
 # files land at qrc:/QMdmm/Gui/qml/..., while MainWindow hardcodes
 # qrc:/qt/qml/QMdmm/Gui/qml/main.qml - the GUI would link, start, and then show
 # nothing at all. Mirrored here rather than worked around, because this is
 # exactly what any downstream project that builds QMdmm's GUI has to do.
-qt6_standard_project_setup(REQUIRES 6.5)
+qt6_standard_project_setup(REQUIRES 6.7)
 include(GNUInstallDirs)
 set(QMdmm_VERSION "${QMdmm6_VERSION}")
 

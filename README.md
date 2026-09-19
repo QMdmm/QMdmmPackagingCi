@@ -113,7 +113,7 @@ installed package:
   generation-free `QMdmm::Core`)
 * `add_subdirectory(<QMdmm>/QMdmmGui)`, `(<QMdmm>/QMdmmBot)` and
   `(<QMdmm>/QMdmmServer)` build all three real applications
-* `qt6_standard_project_setup(REQUIRES 6.5)`, mirroring QMdmm's own root
+* `qt6_standard_project_setup(REQUIRES 6.7)`, mirroring QMdmm's own root
 
 Building QMdmm's own application directories is a much harsher test than a
 hand-written consumer could be: it only works if the installed package exports
