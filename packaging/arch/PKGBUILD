@@ -1,5 +1,6 @@
 # Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
-# QMdmm —— Qt6 单包（Fs 09-16 拍板：qmdmm-6，不拆 dev；头与 CMake config 随主包）
+# QMdmm - a single Qt 6 package. Fs 2026-09-16: named qmdmm-6, no split dev
+# package; the headers and the CMake package ride along in the main one.
 pkgname=qmdmm-6
 pkgver=0.0.1
 pkgrel=1
@@ -7,13 +8,19 @@ pkgdesc="A game which is played in primary / high school (Qt6 build)"
 arch=(x86_64)
 url="https://github.com/QMdmm/QMdmm"
 license=('AGPL-3.0-or-later')
+# Arch has no component split, so the dev-side dependencies the other
+# distributions put in a separate -dev/-devel package have nowhere else to go.
 depends=(
-  qt6-base         # Core / Gui / Network / Widgets 运行时
-  qt6-declarative  # Qml / Quick / QuickWidgets + QML 运行时模块（Arch 不另拆包）
+  cmake            # the package ships /usr/lib/cmake/QMdmm6; consuming it needs CMake
+  qt6-base         # Core / Gui / Network / Widgets, runtime and development files
+  qt6-declarative  # Qml / Quick / QuickWidgets, plus the QML runtime modules
+  qt6-tools        # Qt6LinguistTools (lrelease): QMdmmGui's find_package and qt6_add_translations both need it
   qt6-websockets
 )
-makedepends=(cmake ninja qt6-tools)  # qt6-tools 提供 Qt6LinguistTools（lrelease）
-# 本地源码 tarball：git archive d0f89c9（origin/main @ 09-16），不走 codeload
+# Only what is build-time-only. cmake and qt6-tools are already above, and
+# makepkg honours depends at build time as well.
+makedepends=(ninja)
+# Local source tarball: git archive of d0f89c9 (origin/main @ 2026-09-16), not a codeload download.
 source=("qmdmm-6-${pkgver}.tar.gz")
 sha256sums=('355e0cba7d4b8b33c93e2418b36f9af3a3144d8e7d4b24adba8d317db56a91b5')
 options=(!debug !lto)

@@ -5,13 +5,21 @@ name: Packaging smoke
 # Three stages, run once per distribution:
 #
 #   A  pack     build QMdmm with a full toolchain inside the distribution's own
-#               container and run cpack there.
+#               container and produce packages there. Debian and Fedora go
+#               through cpack; Arch goes through makepkg. Arch's line produces a
+#               single package, which is both the runtime and the dev package,
+#               and it is not signed.
 #   B  runtime  a *clean* container of the same distribution installs only the
 #               runtime package, repairs the dependency set, then proves the
 #               programs load and run.
 #   C  dev      another clean container installs the dev package, repairs the
 #               dependency set, then builds QMdmm's own GUI and Bot from source
 #               against the installed package via find_package(QMdmm6).
+#
+# "Repairs the dependency set" reads differently per line, because the package
+# managers differ: apt can leave a half-installed state to repair, dnf and pacman
+# cannot. Where there is nothing to repair, the settle-up is a database audit
+# instead, and it is what fails if anything is left unsatisfied.
 #
 # B and C deliberately do NOT reuse A's container. With the toolchain and the Qt
 # development packages still installed, a missing runtime dependency would be
@@ -26,6 +34,10 @@ name: Packaging smoke
 # rather than by file path: that is the only way the declared inter-component
 # dependencies (qmdmm-6-dev -> qmdmm-6 + qmdmm-common-dev) are actually resolved
 # instead of being sidestepped.
+#
+# On Arch the same repository serves a narrower purpose. There are no
+# inter-component dependencies to resolve, but installing from it by name still
+# proves the package is findable and its declared Qt dependencies resolvable.
 
 on:
   workflow_dispatch:
@@ -101,19 +113,32 @@ jobs:
           # The sfx_* fields are the package-name suffixes the later stages
           # select on. They differ per distribution because the development
           # packages follow each distribution's own convention: "-dev" on
-          # Debian, "-devel" on Fedora.
+          # Debian, "-devel" on Fedora. Arch splits nothing: one package carries
+          # the runtime, the headers and the CMake package, so the same suffix
+          # answers both questions.
+          #
+          # `expect` is what stage A asserts the produced package names end in.
+          # Arch expecting a single name is the decision, not an omission - the
+          # line has no doc component either, because doxygen is deliberately not
+          # one of the recipe's make dependencies.
           - name: debian
             image: 'debian:sid'
             kind: deb
+            expect: '-6 -6-dev -common-dev -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-dev'
-            sfx_dev_common: '-common-dev'
           - name: fedora
             image: 'fedora:latest'
             kind: rpm
+            expect: '-6 -6-devel -common-devel -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
-            sfx_dev_common: '-common-devel'
+          - name: arch
+            image: 'archlinux:base'
+            kind: pac
+            expect: '-6'
+            sfx_runtime: '-6'
+            sfx_dev: '-6'
     steps:
       - name: Bring the base image up to date
         run: |
@@ -131,8 +156,19 @@ jobs:
           if [ '${{ matrix.dist.kind }}' = deb ]; then
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf -y --setopt=install_weak_deps=False upgrade
+          else
+            # Arch has one rolling repository set, so -Syu is the whole "bring it
+            # up to date" story - there is no sid/stable split to choose between.
+            # The keyring goes first because an image that has aged cannot verify
+            # today's packages, and the mirrorlist is pinned to the canonical geo
+            # mirror so the job does not depend on which entries the image
+            # happens to ship enabled.
+            echo 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
+              > /etc/pacman.d/mirrorlist
+            pacman -Sy --noconfirm --needed archlinux-keyring
+            pacman -Syu --noconfirm
           fi
 
       - name: Install toolchain, Qt 6 and the packagers
@@ -145,12 +181,31 @@ jobs:
               qt6-base-dev qt6-websockets-dev qt6-declarative-dev \
               qt6-declarative-dev-tools qt6-tools-dev qt6-tools-dev-tools \
               qt6-l10n-tools doxygen graphviz
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf install -y --setopt=install_weak_deps=False \
               git ca-certificates gcc-c++ make cmake ninja-build rpm-build rpm \
               qt6-qtbase-devel qt6-qtwebsockets-devel qt6-qtdeclarative-devel \
               qt6-qttools-devel doxygen graphviz
+          else
+            # base-devel is what makepkg expects underneath it (gcc, make,
+            # pkgconf, fakeroot). Arch keeps a Qt module's development files in
+            # the same package as its runtime, so there are no -dev names to ask
+            # for. pacman-contrib brings updpkgsums, which is how the recipe's
+            # checksums follow the tarball this run produces. No doxygen: the Arch
+            # recipe ships no doc component, deliberately. The recipe's own make
+            # dependencies are named here rather than left to makepkg: makepkg
+            # runs as a plain user below and must not have to install anything.
+            pacman -S --noconfirm --needed \
+              base-devel git ca-certificates cmake ninja \
+              qt6-base qt6-declarative qt6-websockets qt6-tools pacman-contrib
           fi
+
+      # Only the Arch line needs this repository checked out: its package
+      # description is the recipe in it. Debian and Fedora describe their
+      # packages with cpack options from the QMdmm tree itself.
+      - name: Checkout this harness
+        if: matrix.dist.kind == 'pac'
+        uses: actions/checkout@v7
 
       - name: Fetch QMdmm at the requested ref
         run: |
@@ -161,7 +216,36 @@ jobs:
           git -C qmdmm-src checkout --detach FETCH_HEAD
           echo "QMdmm HEAD: $(git -C qmdmm-src log --oneline -1)"
 
+      # Arch configures, builds, packs and inspects in one pass inside makepkg, so
+      # the three steps that follow are skipped there rather than duplicated: the
+      # recipe in packaging/arch is the Arch line's build description.
+      - name: Build the package with makepkg
+        if: matrix.dist.kind == 'pac'
+        run: |
+          set -euxo pipefail
+          pkgver=$(sed -n 's/^pkgver=\(.*\)$/\1/p' packaging/arch/PKGBUILD)
+          mkdir -p arch-build
+          cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO arch-build/
+          # The recipe takes a local tarball rather than a codeload download; its
+          # NOTES say how it was produced. The prefix is what makes the recipe's
+          # own `cd "$pkgname-$pkgver"` find the extracted tree.
+          git -C qmdmm-src archive --format=tar.gz \
+            --prefix="qmdmm-6-${pkgver}/" HEAD \
+            -o "arch-build/qmdmm-6-${pkgver}.tar.gz"
+          # The committed checksums pin the tarball of the one locally verified
+          # build. A run packages whatever ref it was handed, so they have to
+          # follow the tarball that was actually produced.
+          ( cd arch-build && updpkgsums )
+          # makepkg refuses to run as root and every step of a container job runs
+          # as root, so the build happens as an ordinary user. Stages B and C go
+          # back to root: installing is not building.
+          useradd -m -s /bin/bash builder
+          chown -R builder:builder arch-build
+          su builder -c "cd '$PWD/arch-build' && makepkg -f --noconfirm"
+          ls -l arch-build/*.pkg.tar.zst
+
       - name: Configure
+        if: matrix.dist.kind != 'pac'
         run: |
           set -euxo pipefail
           # /usr is where a distribution package installs: it decides both the
@@ -173,9 +257,11 @@ jobs:
             -DQMDMM_EXPORT_PRIVATE=NO
 
       - name: Build
+        if: matrix.dist.kind != 'pac'
         run: cmake --build build --parallel
 
       - name: Pack
+        if: matrix.dist.kind != 'pac'
         run: |
           set -euxo pipefail
           cd build
@@ -190,26 +276,43 @@ jobs:
       - name: Collect packages and record their real names
         run: |
           set -euxo pipefail
-          ext='${{ matrix.dist.kind }}'
+          kind='${{ matrix.dist.kind }}'
           mkdir -p out
-          cp -v build/*."$ext" out/
+          if [ "$kind" = pac ]; then
+            cp -v arch-build/*.pkg.tar.zst out/
+            ext='pkg.tar.zst'
+          else
+            cp -v build/*."$kind" out/
+            ext="$kind"
+          fi
 
           # Names are read back out of the packages instead of being assumed:
           # the component suffixes are what stages B and C select on.
           printf 'package\tversion\tfile\n' > out/MANIFEST.tsv
           for f in out/*."$ext"; do
-            if [ "$ext" = deb ]; then
+            if [ "$kind" = deb ]; then
               p=$(dpkg-deb -f "$f" Package)
               v=$(dpkg-deb -f "$f" Version)
-            else
+            elif [ "$kind" = rpm ]; then
               p=$(rpm -qp --qf '%{NAME}' "$f")
               v=$(rpm -qp --qf '%{VERSION}' "$f")
+            else
+              # pacman reads the metadata straight out of the package file, the
+              # same way dpkg-deb and rpm do.
+              info=$(pacman -Qip "$f")
+              p=$(sed -n 's/^Name *: *//p' <<<"$info")
+              v=$(sed -n 's/^Version *: *//p' <<<"$info")
             fi
             printf '%s\t%s\t%s\n' "$p" "$v" "$(basename "$f")" >> out/MANIFEST.tsv
           done
 
+          if [ "$kind" = pac ]; then
+            how='makepkg'
+          else
+            how="cpack -G $kind"
+          fi
           {
-            echo "### Packages produced by \`cpack -G $ext\`"
+            echo "### Packages produced by \`$how\`"
             echo
             echo '```'
             cat out/MANIFEST.tsv
@@ -217,11 +320,17 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           missing=''
-          for suffix in '${{ matrix.dist.sfx_runtime }}' '${{ matrix.dist.sfx_dev }}' \
-                        '${{ matrix.dist.sfx_dev_common }}' -doc; do
+          for suffix in ${{ matrix.dist.expect }}; do
             awk -F'\t' -v s="$suffix" '$1 ~ s"$" { found = 1 } END { exit !found }' \
               out/MANIFEST.tsv || missing="$missing $suffix"
           done
+          if [ "$kind" = pac ]; then
+            produced=$(awk 'END { print NR - 1 }' out/MANIFEST.tsv)
+            if [ "$produced" -ne 1 ]; then
+              echo "::error::the Arch line produces one package by decision, but $produced were produced"
+              exit 1
+            fi
+          fi
           if [ -n "$missing" ]; then
             echo "::error::missing component package(s) with suffix:$missing"
             exit 1
@@ -230,17 +339,20 @@ jobs:
       - name: Dump the declared dependency metadata
         run: |
           set -euxo pipefail
-          ext='${{ matrix.dist.kind }}'
+          kind='${{ matrix.dist.kind }}'
+          if [ "$kind" = pac ]; then ext='pkg.tar.zst'; else ext="$kind"; fi
           {
             echo "### Declared dependencies as shipped"
             echo
             for f in out/*."$ext"; do
               echo "#### \`$(basename "$f")\`"
               echo '```'
-              if [ "$ext" = deb ]; then
+              if [ "$kind" = deb ]; then
                 dpkg-deb -f "$f" Package Depends
-              else
+              elif [ "$kind" = rpm ]; then
                 rpm -qpi "$f" | grep -E '^(Name|Version|Requires)' || true
+              else
+                pacman -Qip "$f" | grep -E '^(Name|Version|Depends On)' || true
               fi
               echo '```'
             done
@@ -267,19 +379,32 @@ jobs:
           # The sfx_* fields are the package-name suffixes the later stages
           # select on. They differ per distribution because the development
           # packages follow each distribution's own convention: "-dev" on
-          # Debian, "-devel" on Fedora.
+          # Debian, "-devel" on Fedora. Arch splits nothing: one package carries
+          # the runtime, the headers and the CMake package, so the same suffix
+          # answers both questions.
+          #
+          # `expect` is what stage A asserts the produced package names end in.
+          # Arch expecting a single name is the decision, not an omission - the
+          # line has no doc component either, because doxygen is deliberately not
+          # one of the recipe's make dependencies.
           - name: debian
             image: 'debian:sid'
             kind: deb
+            expect: '-6 -6-dev -common-dev -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-dev'
-            sfx_dev_common: '-common-dev'
           - name: fedora
             image: 'fedora:latest'
             kind: rpm
+            expect: '-6 -6-devel -common-devel -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
-            sfx_dev_common: '-common-devel'
+          - name: arch
+            image: 'archlinux:base'
+            kind: pac
+            expect: '-6'
+            sfx_runtime: '-6'
+            sfx_dev: '-6'
     steps:
       - name: Bring the base image up to date
         run: |
@@ -297,8 +422,19 @@ jobs:
           if [ '${{ matrix.dist.kind }}' = deb ]; then
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf -y --setopt=install_weak_deps=False upgrade
+          else
+            # Arch has one rolling repository set, so -Syu is the whole "bring it
+            # up to date" story - there is no sid/stable split to choose between.
+            # The keyring goes first because an image that has aged cannot verify
+            # today's packages, and the mirrorlist is pinned to the canonical geo
+            # mirror so the job does not depend on which entries the image
+            # happens to ship enabled.
+            echo 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
+              > /etc/pacman.d/mirrorlist
+            pacman -Sy --noconfirm --needed archlinux-keyring
+            pacman -Syu --noconfirm
           fi
 
       - name: Install the inspection tooling
@@ -308,8 +444,13 @@ jobs:
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
               binutils dpkg-dev apt-utils
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf install -y --setopt=install_weak_deps=False binutils createrepo_c
+          else
+            # binutils is the whole list here: ldd is the assertion and strings is
+            # the QML check, and repo-add - Arch's counterpart of
+            # dpkg-scanpackages and createrepo_c - ships with pacman itself.
+            pacman -S --noconfirm --needed binutils
           fi
           command -v ldd
 
@@ -329,11 +470,22 @@ jobs:
             echo "deb [trusted=yes] file://$PWD ./" > /etc/apt/sources.list.d/qmdmm-local.list
             cd ..
             apt-get update
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             createrepo_c pkgs
             printf '[qmdmm-local]\nname=QMdmm local\nbaseurl=file://%s/pkgs\nenabled=1\ngpgcheck=0\n' \
               "$PWD" > /etc/yum.repos.d/qmdmm-local.repo
             cat /etc/yum.repos.d/qmdmm-local.repo
+          else
+            # Arch's repository is built by repo-add, which ships with pacman. The
+            # line does not sign its package, so this section carries it as
+            # optional-and-trusted instead of requiring a signature - a decision
+            # confined to this one local repository, never to the system's own
+            # repositories.
+            repo-add pkgs/qmdmm-local.db.tar.gz pkgs/*.pkg.tar.zst
+            printf '\n[qmdmm-local]\nSigLevel = Optional TrustAll\nServer = file://%s/pkgs\n' \
+              "$PWD" >> /etc/pacman.conf
+            tail -4 /etc/pacman.conf
+            pacman -Syu --noconfirm
           fi
 
       - name: Install the runtime package and repair the dependency set (deb)
@@ -381,6 +533,36 @@ jobs:
             echo
             echo '```'
             cat /tmp/dnfcheck.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the package and audit the dependency set (pac)
+        if: matrix.dist.kind == 'pac'
+        run: |
+          set -euxo pipefail
+          pkg=$(awk -F'\t' -v s='${{ matrix.dist.sfx_runtime }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "package: $pkg"
+          # pacman resolves a whole transaction or refuses it, like dnf, so there
+          # is no half-installed state to repair and no repair pass here. What
+          # carries the claim "the declared dependencies were complete" is the
+          # database audit: it reports dependencies that are not installed for
+          # every package on the system, not just the one under test.
+          pacman -S --noconfirm --needed "$pkg"
+          if pacman -Dk > /tmp/depcheck.log 2>&1; then
+            echo 'pacman -Dk: no missing dependencies'
+          else
+            cat /tmp/depcheck.log
+            if grep -qE 'qmdmm|qt6-' /tmp/depcheck.log; then
+              echo '::error::pacman reports unsatisfied dependencies for a QMdmm/Qt package'
+              exit 1
+            fi
+            echo '(pacman -Dk reported unrelated issues; not caused by this package)'
+          fi
+          {
+            echo '### Package install: dependency audit'
+            echo
+            echo '```'
+            cat /tmp/depcheck.log
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -579,19 +761,32 @@ jobs:
           # The sfx_* fields are the package-name suffixes the later stages
           # select on. They differ per distribution because the development
           # packages follow each distribution's own convention: "-dev" on
-          # Debian, "-devel" on Fedora.
+          # Debian, "-devel" on Fedora. Arch splits nothing: one package carries
+          # the runtime, the headers and the CMake package, so the same suffix
+          # answers both questions.
+          #
+          # `expect` is what stage A asserts the produced package names end in.
+          # Arch expecting a single name is the decision, not an omission - the
+          # line has no doc component either, because doxygen is deliberately not
+          # one of the recipe's make dependencies.
           - name: debian
             image: 'debian:sid'
             kind: deb
+            expect: '-6 -6-dev -common-dev -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-dev'
-            sfx_dev_common: '-common-dev'
           - name: fedora
             image: 'fedora:latest'
             kind: rpm
+            expect: '-6 -6-devel -common-devel -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
-            sfx_dev_common: '-common-devel'
+          - name: arch
+            image: 'archlinux:base'
+            kind: pac
+            expect: '-6'
+            sfx_runtime: '-6'
+            sfx_dev: '-6'
     steps:
       - name: Bring the base image up to date
         run: |
@@ -609,8 +804,19 @@ jobs:
           if [ '${{ matrix.dist.kind }}' = deb ]; then
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf -y --setopt=install_weak_deps=False upgrade
+          else
+            # Arch has one rolling repository set, so -Syu is the whole "bring it
+            # up to date" story - there is no sid/stable split to choose between.
+            # The keyring goes first because an image that has aged cannot verify
+            # today's packages, and the mirrorlist is pinned to the canonical geo
+            # mirror so the job does not depend on which entries the image
+            # happens to ship enabled.
+            echo 'Server = https://geo.mirror.pkgbuild.com/$repo/os/$arch' \
+              > /etc/pacman.d/mirrorlist
+            pacman -Sy --noconfirm --needed archlinux-keyring
+            pacman -Syu --noconfirm
           fi
 
       - name: Install a plain build toolchain
@@ -626,10 +832,15 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
               git ca-certificates build-essential cmake ninja-build dpkg-dev apt-utils \
               binutils
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf install -y --setopt=install_weak_deps=False \
               git ca-certificates gcc-c++ make cmake ninja-build createrepo_c \
               binutils
+          else
+            # base-devel is the Arch answer to "a plain build toolchain", the
+            # same role build-essential and gcc-c++ play on the other two lines.
+            pacman -S --noconfirm --needed \
+              base-devel git ca-certificates cmake ninja binutils
           fi
 
       - name: Checkout this harness
@@ -651,11 +862,22 @@ jobs:
             echo "deb [trusted=yes] file://$PWD ./" > /etc/apt/sources.list.d/qmdmm-local.list
             cd ..
             apt-get update
-          else
+          elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             createrepo_c pkgs
             printf '[qmdmm-local]\nname=QMdmm local\nbaseurl=file://%s/pkgs\nenabled=1\ngpgcheck=0\n' \
               "$PWD" > /etc/yum.repos.d/qmdmm-local.repo
             cat /etc/yum.repos.d/qmdmm-local.repo
+          else
+            # Arch's repository is built by repo-add, which ships with pacman. The
+            # line does not sign its package, so this section carries it as
+            # optional-and-trusted instead of requiring a signature - a decision
+            # confined to this one local repository, never to the system's own
+            # repositories.
+            repo-add pkgs/qmdmm-local.db.tar.gz pkgs/*.pkg.tar.zst
+            printf '\n[qmdmm-local]\nSigLevel = Optional TrustAll\nServer = file://%s/pkgs\n' \
+              "$PWD" >> /etc/pacman.conf
+            tail -4 /etc/pacman.conf
+            pacman -Syu --noconfirm
           fi
 
       - name: Install the dev package and repair the dependency set (deb)
@@ -705,6 +927,39 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Install the package and audit the dependency set (pac)
+        if: matrix.dist.kind == 'pac'
+        run: |
+          set -euxo pipefail
+          # The same package the runtime stage installs: Arch splits nothing, so
+          # this line's runtime package *is* its dev package. What is tested here
+          # is therefore not "a second package resolves" but "one package is
+          # enough to build against" - the headers and the CMake package it
+          # carries have to work with nothing but what it dragged in.
+          pkg=$(awk -F'\t' -v s='${{ matrix.dist.sfx_dev }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "package: $pkg"
+          pacman -S --noconfirm --needed "$pkg"
+          # Same audit as the runtime stage, for the same reason: pacman either
+          # resolves the transaction or refuses it, so what is left to check is
+          # whether anything on the system is unsatisfied.
+          if pacman -Dk > /tmp/depcheck.log 2>&1; then
+            echo 'pacman -Dk: no missing dependencies'
+          else
+            cat /tmp/depcheck.log
+            if grep -qE 'qmdmm|qt6-' /tmp/depcheck.log; then
+              echo '::error::pacman reports unsatisfied dependencies for a QMdmm/Qt package'
+              exit 1
+            fi
+            echo '(pacman -Dk reported unrelated issues; not caused by this package)'
+          fi
+          {
+            echo '### Dev install: dependency audit'
+            echo
+            echo '```'
+            cat /tmp/depcheck.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Report what the dev package dragged in
         run: |
           set -euxo pipefail
@@ -714,8 +969,10 @@ jobs:
             echo '```'
             if [ '${{ matrix.dist.kind }}' = deb ]; then
               dpkg-query -W -f='${Package}\t${Version}\n' | sort
-            else
+            elif [ '${{ matrix.dist.kind }}' = rpm ]; then
               rpm -qa --qf '%{NAME}\t%{VERSION}\n' | sort
+            else
+              pacman -Q | sort
             fi
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

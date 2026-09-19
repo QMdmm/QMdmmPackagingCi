@@ -26,34 +26,52 @@ local repository is the only way the declared inter-component dependencies
 (`qmdmm-6-dev` → `qmdmm-6` + `qmdmm-common-dev`, and the `-devel` equivalents)
 actually get resolved rather than sidestepped.
 
+On Arch there are no inter-component dependencies to resolve — one package, no
+components — and the repository is kept anyway: installing from it *by name* is
+still what shows the package is findable and its declared Qt dependencies
+resolvable.
+
 Every job begins by bringing its own image up to date (`apt-get update` +
-`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora). An image is a
-snapshot, and installing onto a stale one would blend two different things
-together: what the package under test declares, and whatever the base image was
-simply missing. Refreshing first is what makes everything that lands afterwards
-attributable to the packages being tested.
+`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora, `pacman -Syu` on
+Arch). An image is a snapshot, and installing onto a stale one would blend two
+different things together: what the package under test declares, and whatever the
+base image was simply missing. Refreshing first is what makes everything that
+lands afterwards attributable to the packages being tested.
 
 ## Package names
 
 The dev packages follow each distribution's own convention:
 
-| component | Debian | Fedora |
-|---|---|---|
-| `6` (runtime) | `qmdmm-6` | `qmdmm-6` |
-| `dev6` (dev) | `qmdmm-6-dev` | `qmdmm-6-devel` |
-| `dev-common` (headers) | `qmdmm-common-dev` | `qmdmm-common-devel` |
-| `doc` | `qmdmm-doc` | `qmdmm-doc` |
+| component | Debian | Fedora | Arch |
+|---|---|---|---|
+| `6` (runtime) | `qmdmm-6` | `qmdmm-6` | `qmdmm-6` |
+| `dev6` (dev) | `qmdmm-6-dev` | `qmdmm-6-devel` | the same package |
+| `dev-common` (headers) | `qmdmm-common-dev` | `qmdmm-common-devel` | the same package |
+| `doc` | `qmdmm-doc` | `qmdmm-doc` | not produced |
+
+Arch has no mechanism for splitting a package into components at all, and its line
+does not go through CPack in the first place. A line that produces one package has
+to answer both questions with it — stages B and C install the same file — and the
+consequence is that the recipe's `depends` is the union of what the other two
+lines' runtime and dev packages declare: there is no second package to carry the
+other half. That includes `qt6-tools` and `cmake`, without which the headers and
+the CMake package riding along in the runtime package could not be used.
 
 The workflow does not hardcode these: stage A reads the real names back out of
 the produced packages and writes `MANIFEST.tsv`, and stages B and C select on the
-suffix recorded in the matrix. The suffixes in the matrix are therefore also an
-assertion — if a package ends up named something else, stage A fails.
+suffix recorded in the matrix. The names a line must produce are recorded in the
+matrix too (the `expect` field), which makes the shape an assertion as well —
+a package ending up named something else, or an Arch run producing more than one,
+fails stage A.
 
 ## Acceptance criteria
 
-**Stage B** — after bringing the base up to date, installing only the runtime
-package and running the repair command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
-`dnf check --dependencies` audit on Fedora):
+**Stage B** — after bringing the base up to date and installing only the runtime
+package, settling the dependency set as far as that distribution's package manager
+allows (`apt-get -f install` on Debian; a second, idempotent `dnf install` plus a
+`dnf check --dependencies` audit on Fedora; `pacman -Dk`, a database audit, on
+Arch, where a transaction is resolved whole and there is no half-installed state
+to repair):
 
 * `ldd` reports **zero** unresolved libraries for every installed QMdmm binary
   and shared library.
@@ -77,7 +95,8 @@ package and running the repair command (`apt-get -f install` on Debian, an idemp
   the packaged stack.
 
 **Stage C** — after bringing the base up to date, installing only the dev package
-by name and running the same repair pass:
+by name — on Arch that is the same package stage B installed — and running
+the same settle-up:
 
 * `find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)` succeeds.
 * QMdmm's own `QMdmmGui`, `QMdmmBot` and `QMdmmServer` directories build through
@@ -125,6 +144,29 @@ downstream projects have to do: `QMdmmGui/src/mainwindow.cpp` hardcodes
 is decided by the QTP0001 policy, which that call sets. Without it the rebuilt
 GUI links, starts, and then shows an empty window.
 
+## The Arch line
+
+Arch answers the same three questions through the same three stages, with its own
+package manager and its own recipe (`packaging/arch/PKGBUILD`, the file the local
+run was verified with). Three things differ, all of them deliberately:
+
+* **It packages with `makepkg`, not CPack.** The pack stage checks this repository
+  out, builds the source tarball from the QMdmm ref with `git archive` — the
+  recipe takes a local tarball, not a codeload download — and refreshes the
+  recipe's `sha256sums` with `updpkgsums`, because the committed checksums pin the
+  one ref that was verified locally while a run packages whatever ref it was
+  given.
+* **`makepkg` refuses to run as root**, and every step of a container job runs as
+  root, so the pack stage creates an ordinary `builder` user and builds as it.
+  Installing in stages B and C goes back to root: installing is not building.
+* **Nothing is signed.** No signature is produced and none is required, so the
+  local repository that stages B and C install from carries
+  `SigLevel = Optional TrustAll`. That decision is confined to that one
+  repository and never touches the system's own.
+
+The pack stage is pack-only here exactly as it is on the other two lines: tests
+are not run in it, on any of the three.
+
 ## Running it
 
 Daily, on a schedule: the whole suite re-runs against `main` and `Release`, so a
@@ -154,9 +196,9 @@ Inputs (dispatched runs only):
   the packaging work (`packaging-consumer-support`) was merged into.
 * `build_type` — CMake build type, default `Release`.
 
-Images: `debian:sid` and `fedora:latest` (the rolling pointers). Pinning per
-release and adding `fedora:rawhide` as a non-blocking weekly run is left for a
-later pass, once the manual flow is stable.
+Images: `debian:sid`, `fedora:latest` and `archlinux:base` (the rolling
+pointers). Pinning per release and adding `fedora:rawhide` as a non-blocking
+weekly run is left for a later pass, once the manual flow is stable.
 
 ## Qt version matrix
 
