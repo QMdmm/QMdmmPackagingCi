@@ -7,6 +7,19 @@ url="https://github.com/QMdmm/QMdmm"
 arch="all"
 license="AGPL-3.0-only"
 depends="qt6-qtbase qt6-qtdeclarative qt6-qtwebsockets"
+# What a consumer needs in order to build against the installed package. The
+# deb and rpm dev components declare the same set (CPACK_DEBIAN_DEV6_PACKAGE_DEPENDS
+# / CPACK_RPM_DEV6_PACKAGE_REQUIRES in QMdmm's root CMakeLists); without it
+# `qmdmm-dev` brings in the runtime libraries and nothing to compile or configure
+# against, and find_package(Qt6) fails before QMdmm is ever reached. The runtime
+# package itself is added to -dev automatically, version-locked.
+depends_dev="
+	cmake
+	qt6-qtbase-dev
+	qt6-qtdeclarative-dev
+	qt6-qtwebsockets-dev
+	qt6-qttools-dev
+	"
 makedepends="
 	cmake
 	doxygen

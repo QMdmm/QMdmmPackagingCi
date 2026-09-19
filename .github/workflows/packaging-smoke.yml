@@ -6,9 +6,12 @@ name: Packaging smoke
 #
 #   A  pack     build QMdmm with a full toolchain inside the distribution's own
 #               container and produce packages there. Debian and Fedora go
-#               through cpack; Arch goes through makepkg. Arch's line produces a
-#               single package, which is both the runtime and the dev package,
-#               and it is not signed.
+#               through cpack and Arch through makepkg, all three inside this
+#               job's matrix; Alpine's pack stage is a job of its own, because
+#               packaging there is abuild reading packaging/alpine/APKBUILD and
+#               its repository is signed. Arch's line produces a single package,
+#               which is both the runtime and the dev package, and it is not
+#               signed.
 #   B  runtime  a *clean* container of the same distribution installs only the
 #               runtime package, repairs the dependency set, then proves the
 #               programs load and run.
@@ -17,13 +20,22 @@ name: Packaging smoke
 #               against the installed package via find_package(QMdmm6).
 #
 # "Repairs the dependency set" reads differently per line, because the package
-# managers differ: apt can leave a half-installed state to repair, dnf and pacman
-# cannot. Where there is nothing to repair, the settle-up is a database audit
+# managers differ: apt can leave a half-installed state to repair, dnf, pacman and
+# apk cannot. Where there is nothing to repair, the settle-up is a database audit
 # instead, and it is what fails if anything is left unsatisfied.
 #
 # B and C deliberately do NOT reuse A's container. With the toolchain and the Qt
 # development packages still installed, a missing runtime dependency would be
 # masked by them and "minimal but complete" could not be verified at all.
+#
+# All four lines share stages B and C through one matrix: the same questions, put
+# to each distribution in its own vocabulary (apt / dnf / pacman / apk). Stages B
+# and C carry each line's own difference as a branch of its own, plus the steps
+# only that line needs: Alpine installs bash before anything else can run and puts
+# the packager key in the trust store, and Arch's build type has to reach the
+# recipe it packages from. Alpine's repository is *signed*, which is why it has a
+# pack job to itself - apk, unlike apt and dnf, will not install from a repository
+# it cannot verify, and abuild offers no way to stop signing.
 #
 # It runs on a schedule as well as on demand: every day the suite re-verifies
 # whatever `main` has become, so a packaging regression is caught within a day
@@ -93,6 +105,12 @@ env:
   # Containers start with LANG unset, so Qt switches itself to C.UTF-8 and says
   # so on every launch. Setting it here keeps that noise out of the probe logs.
   LANG: C.UTF-8
+  # The basename shared by the Alpine packager's two halves: the public key
+  # committed at packaging/alpine/<name>.rsa.pub, and the private key kept in the
+  # PACKAGER_PRIVKEY secret. abuild derives each signature's file name from the
+  # private key's own name and apk resolves that name in /etc/apk/keys, so the two
+  # file names have to agree for a package to be installable at all.
+  PACKAGER_KEY: neve-6aaaace6
 
 defaults:
   run:
@@ -113,14 +131,21 @@ jobs:
           # The sfx_* fields are the package-name suffixes the later stages
           # select on. They differ per distribution because the development
           # packages follow each distribution's own convention: "-dev" on
-          # Debian, "-devel" on Fedora. Arch splits nothing: one package carries
-          # the runtime, the headers and the CMake package, so the same suffix
-          # answers both questions.
+          # Debian, "-devel" on Fedora, "-dev" again on Alpine - and there the
+          # runtime package carries no Qt generation at all, so its "suffix" is
+          # the whole name and only `qmdmm` matches it. Arch splits nothing: one
+          # package carries the runtime, the headers and the CMake package, so
+          # the same suffix answers both questions.
           #
           # `expect` is what stage A asserts the produced package names end in.
-          # Arch expecting a single name is the decision, not an omission - the
-          # line has no doc component either, because doxygen is deliberately not
-          # one of the recipe's make dependencies.
+          # Where a line's shape is a decision rather than a convention it is
+          # written down here instead of being left implied: Arch expects one
+          # package and no doc component, because doxygen is deliberately not one
+          # of its recipe's make dependencies.
+          #
+          # Alpine is not a row in this job's matrix: its pack stage is the
+          # separate `pack-alpine` job below, which asserts its own three exact
+          # names.
           - name: debian
             image: 'debian:sid'
             kind: deb
@@ -239,7 +264,7 @@ jobs:
           # follow the tarball that was actually produced.
           #
           # The recipe pins Release, as a distribution package should; the build
-          # type is a dial on dispatched runs, and the other two lines hand it
+          # type is a dial on dispatched runs, and the other lines hand it
           # straight to CMake. It is applied to this copy rather than left to
           # diverge, and the assertion is there so a recipe that stops pinning it
           # fails loudly instead of quietly building something nobody asked for.
@@ -382,7 +407,13 @@ jobs:
   # ================================================================= stage B
   verify-runtime:
     name: "B runtime (${{ matrix.dist.name }})"
-    needs: pack
+    # Both pack jobs, because the matrix carries every line. GitHub cannot
+    # express "this row depends on this pack job", so the job is allowed to run
+    # regardless and a row whose own pack job failed fails on its missing
+    # artifact instead - which keeps one line's packaging failure from silently
+    # suppressing the other lines' stages.
+    needs: [pack, pack-alpine]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.dist.image }}
@@ -393,14 +424,20 @@ jobs:
           # The sfx_* fields are the package-name suffixes the later stages
           # select on. They differ per distribution because the development
           # packages follow each distribution's own convention: "-dev" on
-          # Debian, "-devel" on Fedora. Arch splits nothing: one package carries
-          # the runtime, the headers and the CMake package, so the same suffix
-          # answers both questions.
+          # The sfx_* fields are the package-name suffixes the later stages
+          # select on. They differ per distribution because the development
+          # packages follow each distribution's own convention: "-dev" on
+          # Debian, "-devel" on Fedora, "-dev" again on Alpine - and there the
+          # runtime package carries no Qt generation at all, so its "suffix" is
+          # the whole name and only `qmdmm` matches it. Arch splits nothing: one
+          # package carries the runtime, the headers and the CMake package, so
+          # the same suffix answers both questions.
           #
           # `expect` is what stage A asserts the produced package names end in.
-          # Arch expecting a single name is the decision, not an omission - the
-          # line has no doc component either, because doxygen is deliberately not
-          # one of the recipe's make dependencies.
+          # Where a line's shape is a decision rather than a convention it is
+          # written down here instead of being left implied: Arch expects one
+          # package and no doc component, because doxygen is deliberately not one
+          # of its recipe's make dependencies.
           - name: debian
             image: 'debian:sid'
             kind: deb
@@ -413,13 +450,32 @@ jobs:
             expect: '-6 -6-devel -common-devel -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
+            sfx_runtime: '-6'
+            sfx_dev: '-6-devel'
           - name: arch
             image: 'archlinux:base'
             kind: pac
             expect: '-6'
             sfx_runtime: '-6'
             sfx_dev: '-6'
+          - name: alpine
+            image: 'alpine:latest'
+            kind: apk
+            # No `expect`: this row's pack stage is the separate `pack-alpine`
+            # job, which asserts its own three exact names. No dev-common either:
+            # abuild's split_dev puts the headers and the CMake package config
+            # into -dev itself, so there is no third package.
+            sfx_runtime: 'qmdmm'
+            sfx_dev: '-dev'
     steps:
+      - name: Install bash
+        # The alpine image ships busybox ash and this file declares bash as its
+        # shell, so bash has to arrive first - and this one step has to ask for
+        # sh. The other lines start with bash already installed.
+        if: matrix.dist.kind == 'apk'
+        shell: sh
+        run: apk add --no-cache bash
+
       - name: Bring the base image up to date
         run: |
           set -euxo pipefail
@@ -438,7 +494,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
           elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf -y --setopt=install_weak_deps=False upgrade
-          else
+          elif [ '${{ matrix.dist.kind }}' = pac ]; then
             # Arch has one rolling repository set, so -Syu is the whole "bring it
             # up to date" story - there is no sid/stable split to choose between.
             # The keyring goes first because an image that has aged cannot verify
@@ -449,6 +505,11 @@ jobs:
               > /etc/pacman.d/mirrorlist
             pacman -Sy --noconfirm --needed archlinux-keyring
             pacman -Syu --noconfirm
+          else
+            # `--available` is apk's dist-upgrade: every package may move to what
+            # the repositories have now.
+            apk update
+            apk upgrade --available
           fi
 
       - name: Install the inspection tooling
@@ -460,13 +521,28 @@ jobs:
               binutils dpkg-dev apt-utils
           elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf install -y --setopt=install_weak_deps=False binutils createrepo_c
-          else
+          elif [ '${{ matrix.dist.kind }}' = pac ]; then
             # binutils is the whole list here: ldd is the assertion and strings is
             # the QML check, and repo-add - Arch's counterpart of
             # dpkg-scanpackages and createrepo_c - ships with pacman itself.
             pacman -S --noconfirm --needed binutils
+          else
+            # ldd comes from musl-utils here - same criterion as on the glibc
+            # lines, a different implementation of it - and the QML assertion
+            # further down reads a binary with `strings` from binutils. git and
+            # ca-certificates are for the checkout step below (that action shells
+            # out to git); both are installed before the install snapshot, so
+            # neither can be mistaken for something the package dragged in.
+            apk add --no-cache binutils musl-utils git ca-certificates
           fi
           command -v ldd
+
+      - name: Checkout this harness
+        # Only the apk line installs from a repository it has to trust, and the
+        # public half of the packager key lives in this repository - see the
+        # publish step below.
+        if: matrix.dist.kind == 'apk'
+        uses: actions/checkout@v7
 
       - name: Download packages
         uses: actions/download-artifact@v8
@@ -489,7 +565,7 @@ jobs:
             printf '[qmdmm-local]\nname=QMdmm local\nbaseurl=file://%s/pkgs\nenabled=1\ngpgcheck=0\n' \
               "$PWD" > /etc/yum.repos.d/qmdmm-local.repo
             cat /etc/yum.repos.d/qmdmm-local.repo
-          else
+          elif [ '${{ matrix.dist.kind }}' = pac ]; then
             # Arch's repository is built by repo-add, which ships with pacman. The
             # line does not sign its package, so this section carries it as
             # optional-and-trusted instead of requiring a signature - a decision
@@ -500,6 +576,18 @@ jobs:
               "$PWD" >> /etc/pacman.conf
             tail -4 /etc/pacman.conf
             pacman -Syu --noconfirm
+          else
+            # The one place this line asks for something the other lines do not:
+            # neither apt nor dnf refuses an unsigned local repository, so those
+            # lines write trusted=yes / gpgcheck=0 and never meet the question.
+            # apk does refuse one, and abuild offers no way to switch signing
+            # off, so the key that signed the index has to be in place first.
+            install -m 644 "packaging/alpine/$PACKAGER_KEY.rsa.pub" /etc/apk/keys/
+            # The repository is the *parent* of the arch directory: apk appends
+            # <arch>/APKINDEX.tar.gz itself.
+            echo "file://$PWD/pkgs" >> /etc/apk/repositories
+            cat /etc/apk/repositories
+            apk update
           fi
 
       - name: Install the runtime package and repair the dependency set (deb)
@@ -550,7 +638,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install the package and audit the dependency set (pac)
+      - name: Install the runtime package and audit the dependency set (pac)
         if: matrix.dist.kind == 'pac'
         run: |
           set -euxo pipefail
@@ -578,6 +666,40 @@ jobs:
             echo '```'
             cat /tmp/depcheck.log
             echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install the runtime package and audit the dependency set (apk)
+        if: matrix.dist.kind == 'apk'
+        run: |
+          set -euxo pipefail
+          runtime=$(awk -F'\t' -v s='${{ matrix.dist.sfx_runtime }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "runtime package: $runtime"
+          # Installing by name only succeeds if the package declares its own
+          # dependencies - which is the point. apk resolves the whole transaction
+          # or fails, unlike apt, which will leave a half-configured system for
+          # `apt-get -f install` to repair: there is nothing to repair here. The
+          # second install is idempotent and only kept so this step reads like the
+          # other rows'.
+          #
+          # `apk list` rather than `apk info -e`: apk-tools 3 moved that question
+          # to `apk list`, and `alpine:latest` can move under this workflow. A file
+          # rather than a pipe into grep, because with pipefail a grep that exits
+          # early can turn a found match into a SIGPIPE failure.
+          apk list --installed | sort > /tmp/before.txt
+          apk add "$runtime"
+          apk add "$runtime"
+          apk list --installed | sort > /tmp/after.txt
+          grep -qE "^${runtime}-[0-9]" /tmp/after.txt \
+            || { echo "::error::$runtime is not installed"; exit 1; }
+          {
+            echo '### Runtime install: what installing it added'
+            echo
+            echo '```'
+            comm -13 /tmp/before.txt /tmp/after.txt
+            echo '```'
+            echo
+            echo "added: $(comm -13 /tmp/before.txt /tmp/after.txt | wc -l) packages"
+            echo "installed in total: $(wc -l < /tmp/after.txt)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Check that every installed QMdmm binary and library resolves
@@ -609,6 +731,32 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
           failed=0
 
+          # What "still running when the timeout fired" looks like. busybox
+          # timeout - the one on Alpine - reports 143 (128 + SIGTERM) for a child
+          # it had to kill, where GNU coreutils reports 124. The accepted set
+          # follows each line's own timeout instead of taking both everywhere: on
+          # the glibc lines a 143 would mean something *else* killed the program,
+          # which is exactly what this check exists to catch.
+          timeout_rcs='0 124'
+          if [ '${{ matrix.dist.kind }}' = apk ]; then timeout_rcs='0 124 143'; fi
+          survived() {
+            local r
+            for r in $timeout_rcs; do
+              [ "$1" = "$r" ] && return 0
+            done
+            return 1
+          }
+          # The loader's own words for a failure, and musl phrases it differently
+          # from glibc: a missing library is "version X not found" there, and a
+          # crash is Segmentation/Aborted rather than a shared-library error.
+          fatal() {
+            local re='error while loading shared libraries|undefined symbol|symbol lookup error'
+            if [ '${{ matrix.dist.kind }}' = apk ]; then
+              re='error while loading|version .* not found|undefined symbol|symbol lookup error|Segmentation|Aborted'
+            fi
+            grep -qiE "$re" "$1"
+          }
+
           # Seeing the connection the server accepted is what turns "the bot is
           # running" into "the bot really reached the server". That is read out of
           # the kernel's socket tables, where QMdmm's default TCP port 6366 spells
@@ -636,8 +784,9 @@ jobs:
           {
             echo '### Programs started from the installed runtime package'
             echo
-            echo 'rc=124 means the program was still running when the timeout hit,'
-            echo 'which is what a GUI, a server and a bot are supposed to do.'
+            echo 'rc 124 (GNU timeout) and rc 143 (busybox timeout) both mean the'
+            echo 'program was still running when the timeout hit, which is what a'
+            echo 'GUI, a server and a bot are supposed to do.'
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -646,12 +795,12 @@ jobs:
           rc=$?
           echo "### /usr/bin/QMdmm6 rc=$rc"
           sed -e 's/^/  err| /' /tmp/gui.err
-          if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
+          if ! survived "$rc"; then
             echo "::error::QMdmm6 exited with rc=$rc"
             failed=1
           fi
-          if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' /tmp/gui.err; then
-            echo "::error::QMdmm6 has a dynamic loading failure"
+          if fatal /tmp/gui.err; then
+            echo "::error::QMdmm6 reported a fatal loading or crash message"
             failed=1
           fi
           # Staying alive is not the whole story for a GUI: with the QML resource
@@ -739,8 +888,8 @@ jobs:
             grep -hE ":${port_hex} " $net_files || echo '(none at all)'
             failed=1
           fi
-          if grep -qiE 'error while loading shared libraries|undefined symbol|symbol lookup error' /tmp/bot.err; then
-            echo "::error::QMdmmBot6 has a dynamic loading failure"
+          if fatal /tmp/bot.err; then
+            echo "::error::QMdmmBot6 reported a fatal loading or crash message"
             failed=1
           fi
 
@@ -764,7 +913,8 @@ jobs:
   # ================================================================= stage C
   verify-dev:
     name: "C dev (${{ matrix.dist.name }})"
-    needs: pack
+    needs: [pack, pack-alpine]
+    if: always() && !cancelled()
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.dist.image }}
@@ -775,14 +925,20 @@ jobs:
           # The sfx_* fields are the package-name suffixes the later stages
           # select on. They differ per distribution because the development
           # packages follow each distribution's own convention: "-dev" on
-          # Debian, "-devel" on Fedora. Arch splits nothing: one package carries
-          # the runtime, the headers and the CMake package, so the same suffix
-          # answers both questions.
+          # The sfx_* fields are the package-name suffixes the later stages
+          # select on. They differ per distribution because the development
+          # packages follow each distribution's own convention: "-dev" on
+          # Debian, "-devel" on Fedora, "-dev" again on Alpine - and there the
+          # runtime package carries no Qt generation at all, so its "suffix" is
+          # the whole name and only `qmdmm` matches it. Arch splits nothing: one
+          # package carries the runtime, the headers and the CMake package, so
+          # the same suffix answers both questions.
           #
           # `expect` is what stage A asserts the produced package names end in.
-          # Arch expecting a single name is the decision, not an omission - the
-          # line has no doc component either, because doxygen is deliberately not
-          # one of the recipe's make dependencies.
+          # Where a line's shape is a decision rather than a convention it is
+          # written down here instead of being left implied: Arch expects one
+          # package and no doc component, because doxygen is deliberately not one
+          # of its recipe's make dependencies.
           - name: debian
             image: 'debian:sid'
             kind: deb
@@ -795,13 +951,32 @@ jobs:
             expect: '-6 -6-devel -common-devel -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
+            sfx_runtime: '-6'
+            sfx_dev: '-6-devel'
           - name: arch
             image: 'archlinux:base'
             kind: pac
             expect: '-6'
             sfx_runtime: '-6'
             sfx_dev: '-6'
+          - name: alpine
+            image: 'alpine:latest'
+            kind: apk
+            # No `expect`: this row's pack stage is the separate `pack-alpine`
+            # job, which asserts its own three exact names. No dev-common either:
+            # abuild's split_dev puts the headers and the CMake package config
+            # into -dev itself, so there is no third package.
+            sfx_runtime: 'qmdmm'
+            sfx_dev: '-dev'
     steps:
+      - name: Install bash
+        # The alpine image ships busybox ash and this file declares bash as its
+        # shell, so bash has to arrive first - and this one step has to ask for
+        # sh. The other lines start with bash already installed.
+        if: matrix.dist.kind == 'apk'
+        shell: sh
+        run: apk add --no-cache bash
+
       - name: Bring the base image up to date
         run: |
           set -euxo pipefail
@@ -820,7 +995,7 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get dist-upgrade -y
           elif [ '${{ matrix.dist.kind }}' = rpm ]; then
             dnf -y --setopt=install_weak_deps=False upgrade
-          else
+          elif [ '${{ matrix.dist.kind }}' = pac ]; then
             # Arch has one rolling repository set, so -Syu is the whole "bring it
             # up to date" story - there is no sid/stable split to choose between.
             # The keyring goes first because an image that has aged cannot verify
@@ -831,6 +1006,11 @@ jobs:
               > /etc/pacman.d/mirrorlist
             pacman -Sy --noconfirm --needed archlinux-keyring
             pacman -Syu --noconfirm
+          else
+            # `--available` is apk's dist-upgrade: every package may move to what
+            # the repositories have now.
+            apk update
+            apk upgrade --available
           fi
 
       - name: Install a plain build toolchain
@@ -850,11 +1030,17 @@ jobs:
             dnf install -y --setopt=install_weak_deps=False \
               git ca-certificates gcc-c++ make cmake ninja-build createrepo_c \
               binutils
-          else
+          elif [ '${{ matrix.dist.kind }}' = pac ]; then
             # base-devel is the Arch answer to "a plain build toolchain", the
-            # same role build-essential and gcc-c++ play on the other two lines.
+            # same role build-essential and gcc-c++ play on the other lines.
             pacman -S --noconfirm --needed \
               base-devel git ca-certificates cmake ninja binutils
+          else
+            # The Alpine equivalent of build-essential. g++ is a package of its
+            # own here and is not part of gcc: without it CMake finds no CXX
+            # compiler at all and fails at project(). pkgconf is named because
+            # Qt's own CMake files want it, as pkg-config is on the Debian line.
+            apk add --no-cache git ca-certificates gcc g++ musl-dev make cmake pkgconf binutils
           fi
 
       - name: Checkout this harness
@@ -881,7 +1067,7 @@ jobs:
             printf '[qmdmm-local]\nname=QMdmm local\nbaseurl=file://%s/pkgs\nenabled=1\ngpgcheck=0\n' \
               "$PWD" > /etc/yum.repos.d/qmdmm-local.repo
             cat /etc/yum.repos.d/qmdmm-local.repo
-          else
+          elif [ '${{ matrix.dist.kind }}' = pac ]; then
             # Arch's repository is built by repo-add, which ships with pacman. The
             # line does not sign its package, so this section carries it as
             # optional-and-trusted instead of requiring a signature - a decision
@@ -892,6 +1078,13 @@ jobs:
               "$PWD" >> /etc/pacman.conf
             tail -4 /etc/pacman.conf
             pacman -Syu --noconfirm
+          else
+            # Same as stage B: the key has to be in place before the repository
+            # is, or apk rejects the index as UNTRUSTED. See the note there.
+            install -m 644 "packaging/alpine/$PACKAGER_KEY.rsa.pub" /etc/apk/keys/
+            echo "file://$PWD/pkgs" >> /etc/apk/repositories
+            cat /etc/apk/repositories
+            apk update
           fi
 
       - name: Install the dev package and repair the dependency set (deb)
@@ -941,7 +1134,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Install the package and audit the dependency set (pac)
+      - name: Install the dev package and audit the dependency set (pac)
         if: matrix.dist.kind == 'pac'
         run: |
           set -euxo pipefail
@@ -974,6 +1167,28 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Install the dev package and audit the dependency set (apk)
+        if: matrix.dist.kind == 'apk'
+        run: |
+          set -euxo pipefail
+          dev=$(awk -F'\t' -v s='${{ matrix.dist.sfx_dev }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          runtime=$(awk -F'\t' -v s='${{ matrix.dist.sfx_runtime }}' '$1 ~ s"$" { print $1 }' pkgs/MANIFEST.tsv)
+          echo "dev package: $dev"
+          # Installing the dev package by name only succeeds if it declares its
+          # own runtime, documentation and Qt dependencies - which is the point.
+          # On this line that declaration is `depends_dev` in the APKBUILD:
+          # abuild's default split gives -dev the runtime package and the so:
+          # closure of its symlinks, which is nothing to compile against.
+          apk list --installed | sort > /tmp/before.txt
+          apk add "$dev"
+          apk list --installed | sort > /tmp/after.txt
+          grep -qE "^${dev}-[0-9]" /tmp/after.txt \
+            || { echo "::error::$dev is not installed"; exit 1; }
+          # The runtime package has to arrive with it, not have been installed by
+          # hand above.
+          grep -qE "^${runtime}-[0-9]" /tmp/after.txt \
+            || { echo "::error::$runtime did not come with the dev package"; exit 1; }
+
       - name: Report what the dev package dragged in
         run: |
           set -euxo pipefail
@@ -985,10 +1200,20 @@ jobs:
               dpkg-query -W -f='${Package}\t${Version}\n' | sort
             elif [ '${{ matrix.dist.kind }}' = rpm ]; then
               rpm -qa --qf '%{NAME}\t%{VERSION}\n' | sort
-            else
+            elif [ '${{ matrix.dist.kind }}' = pac ]; then
               pacman -Q | sort
+            else
+              # The difference the dev package made to the package set: apk
+              # resolves the whole transaction or fails, so the repair pass the
+              # Debian line runs afterwards has no counterpart here.
+              comm -13 /tmp/before.txt /tmp/after.txt
             fi
             echo '```'
+            if [ '${{ matrix.dist.kind }}' = apk ]; then
+              echo
+              echo "added: $(comm -13 /tmp/before.txt /tmp/after.txt | wc -l) packages"
+              echo "installed in total: $(wc -l < /tmp/after.txt)"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fetch the QMdmm sources for the GUI and Bot
@@ -1002,7 +1227,12 @@ jobs:
       - name: Build the consumer project against the installed package
         run: |
           set -euxo pipefail
-          cmake -S consumer -B consumer-build -G Ninja \
+          # Ninja everywhere except Alpine, whose cmake defaults to it while the
+          # ninja-build package puts the binary off PATH - that line asks for Unix
+          # Makefiles, which is also why its toolchain installs `make`.
+          generator='Ninja'
+          if [ '${{ matrix.dist.kind }}' = apk ]; then generator='Unix Makefiles'; fi
+          cmake -S consumer -B consumer-build -G "$generator" \
             -DCMAKE_BUILD_TYPE='${{ env.QMDMM_BUILD_TYPE }}' \
             -DQMDMM_SOURCE_DIR="$PWD/qmdmm-src" 2>&1 | tee /tmp/consumer-configure.log
           cmake --build consumer-build --parallel
@@ -1032,6 +1262,26 @@ jobs:
 
           export QT_QPA_PLATFORM=offscreen
 
+          # Same two criteria as stage B, and the same reasoning: what counts as
+          # "still running" and what counts as a failure both follow the
+          # distribution's own timeout and loader.
+          timeout_rcs='0 124'
+          if [ '${{ matrix.dist.kind }}' = apk ]; then timeout_rcs='0 124 143'; fi
+          survived() {
+            local r
+            for r in $timeout_rcs; do
+              [ "$1" = "$r" ] && return 0
+            done
+            return 1
+          }
+          fatal() {
+            local re='error while loading shared libraries|undefined symbol|symbol lookup error'
+            if [ '${{ matrix.dist.kind }}' = apk ]; then
+              re='error while loading|version .* not found|undefined symbol|symbol lookup error|Segmentation|Aborted'
+            fi
+            grep -qiE "$re" "$1"
+          }
+
           # Same connection probe as the runtime stage: 6366 reads 18DE in the
           # kernel socket tables, 0A is LISTEN and 01 is ESTABLISHED. Falls back
           # to liveness, with a warning, if those files are not readable here.
@@ -1056,8 +1306,12 @@ jobs:
           rc=$?
           echo "### rebuilt GUI rc=$rc"
           sed -e 's/^/  err| /' /tmp/gui.err
-          if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
+          if ! survived "$rc"; then
             echo "::error::rebuilt GUI exited with rc=$rc"
+            failed=1
+          fi
+          if fatal /tmp/gui.err; then
+            echo "::error::the rebuilt GUI reported a fatal loading or crash message"
             failed=1
           fi
           # Linking and staying alive is not the whole story for this one: with
@@ -1084,8 +1338,12 @@ jobs:
           rc=$?
           echo "### rebuilt Server rc=$rc"
           sed -e 's/^/  err| /' /tmp/rserver.err
-          if [ "$rc" != 0 ] && [ "$rc" != 124 ]; then
+          if ! survived "$rc"; then
             echo "::error::rebuilt Server exited with rc=$rc"
+            failed=1
+          fi
+          if fatal /tmp/rserver.err; then
+            echo "::error::the rebuilt Server reported a fatal loading or crash message"
             failed=1
           fi
 
@@ -1134,6 +1392,10 @@ jobs:
             failed=1
           fi
           sed -e 's/^/  err| /' /tmp/bot.err
+          if fatal /tmp/bot.err; then
+            echo "::error::the rebuilt Bot reported a fatal loading or crash message"
+            failed=1
+          fi
           if [ "$bot_connected" -eq 1 ]; then
             echo "### the rebuilt Bot connected to the installed server over TCP"
           elif [ "$net_visible" -eq 1 ]; then
@@ -1159,7 +1421,9 @@ jobs:
             echo 'then QMdmm''s own QMdmmGui, QMdmmBot and QMdmmServer sources are'
             echo 'added with `add_subdirectory` and resolved against `QMdmm6::Core`'
             echo 'and `QMdmm6::Networking`. A green run means the dev package is'
-            echo 'sufficient to rebuild all three applications.'
+            echo 'sufficient to rebuild all three applications. On the apk line that'
+            echo 'rests on `depends_dev` in packaging/alpine/APKBUILD, since apk'
+            echo 'installs nothing beyond what a package declares.'
             echo
             echo 'The rebuilt GUI is checked for a resolved QML resource, not just'
             echo 'for staying alive, and the rebuilt Bot is pointed at the installed'
@@ -1171,3 +1435,236 @@ jobs:
             grep -E 'QMdmm6_VERSION|QT_GENERATION|Qt6.*DIR' /tmp/consumer-configure.log | head -20 || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # =============================================================== stage A alpine
+  # Stage A of the Alpine line is a job of its own: it shares no step with the
+  # cpack job above. There is no cpack here - the package comes out of abuild and
+  # packaging/alpine/APKBUILD - and the names carry no Qt-generation suffix
+  # (qmdmm / qmdmm-dev / qmdmm-doc), which makes the runtime package a prefix of
+  # every other name and its exact names the only useful thing to assert on. The
+  # local repository is a *signed* APKINDEX as well, which is why this workflow
+  # holds a packager key at all.
+  #
+  # Stages B and C are the matrix rows above, with the alpine branch of each
+  # step: installing from a signed repository, reporting an install's delta
+  # rather than a repair pass, and judging "still running" by busybox's timeout.
+  #
+  # The `build_type` input does not reach this stage: the recipe pins
+  # CMAKE_BUILD_TYPE=Release itself. It still reaches stage C's consumer build,
+  # as on the other lines.
+  pack-alpine:
+    name: "A pack (alpine)"
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install bash
+        # The image ships busybox ash alone, and this file declares bash as its
+        # shell, so bash has to arrive before anything else can run. This one step
+        # therefore asks for sh explicitly.
+        shell: sh
+        run: apk add --no-cache bash
+
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          # Same reasoning as the Debian and Fedora jobs: everything installed
+          # afterwards must be measured against a current archive rather than
+          # against a snapshot. `--available` is apk's dist-upgrade - every
+          # package may move to what the repositories have now.
+          apk update
+          apk upgrade --available
+
+      - name: Install the packager
+        run: |
+          set -euxo pipefail
+          # Deliberately the packager only. The local (proot) verification had to
+          # pre-install the whole toolchain and call abuild with -d, because proot
+          # does not emulate the setuid on abuild-sudo; a container is a real root
+          # environment where that helper works, so `abuild -r` resolves
+          # makedepends by itself. Pre-installing that closure here would quietly
+          # delete the most valuable thing this stage verifies.
+          apk add --no-cache abuild fakeroot scanelf git ca-certificates openssl tar
+          # abuild refuses to run as root, and the abuild package already created
+          # the group its setuid helper authorizes through (gid 300): the group is
+          # not created here and its gid is not pinned.
+          adduser -D -G abuild builder
+          id builder
+
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Install the packager key
+        env:
+          PRIVKEY: ${{ secrets.PACKAGER_PRIVKEY }}
+        run: |
+          set -euxo pipefail
+          if [ -z "$PRIVKEY" ]; then
+            echo "::error::the PACKAGER_PRIVKEY secret is not set, and abuild cannot sign a package without a key"
+            exit 1
+          fi
+          priv="/home/builder/.abuild/$PACKAGER_KEY.rsa"
+          pub="packaging/alpine/$PACKAGER_KEY.rsa.pub"
+          install -d -m 700 -o builder -g abuild /home/builder/.abuild
+          printf '%s\n' "$PRIVKEY" > "$priv"
+          chown builder:abuild "$priv"
+          chmod 600 "$priv"
+          # abuild-sign is handed the private key and takes two things from the
+          # public half: it has to be next to it as <private>.pub, and the
+          # signature member it writes is named after that file (".SIGN.RSA.
+          # <name>"). apk resolves the same name in /etc/apk/keys, so the halves
+          # have to be a pair *and* the two file names have to agree - a mismatch
+          # would otherwise only surface two stages later as a bare "UNTRUSTED
+          # signature". Assert both here, and put the committed public half where
+          # abuild-sign looks for it.
+          openssl pkey -in "$priv" -pubout -outform DER \
+            | cmp - <(openssl pkey -pubin -in "$pub" -outform DER)
+          install -m 644 -o builder -g abuild "$pub" "$priv.pub"
+          # The building container needs it in its trust store as well, and not
+          # only the consuming ones: `abuild -r` finishes by updating the
+          # repository index, and `apk index` verifies the signature of every
+          # package it indexes. Without the key here that last step fails once per
+          # package with "UNTRUSTED signature" - after the whole build, which is
+          # an expensive way to learn that the key was not where apk looks.
+          install -m 644 "$pub" /etc/apk/keys/
+          # And ask abuild itself. This is the very first thing `abuild -r` does
+          # ("check early if we have abuild key"), so finding out here costs
+          # seconds instead of the whole build.
+          su builder -c "HOME=/home/builder PACKAGER_PRIVKEY=$priv abuild-sign --installed"
+          echo "the secret and $pub are the same pair, abuild-sign can use them, and apk trusts the key"
+
+      - name: Prepare the recipe and the source tarball
+        run: |
+          set -euxo pipefail
+          install -d -m 755 -o builder -g abuild /home/builder/qmdmm
+          install -m 644 -o builder -g abuild packaging/alpine/APKBUILD /home/builder/qmdmm/APKBUILD
+          # A git tree rather than a codeload download: `git archive` is what
+          # produces the layout abuild looks for, and the prefix has to be
+          # $pkgname-$pkgver or abuild will not find the directory it expects to
+          # unpack into. The clone is kept out of the recipe directory on purpose,
+          # because abuild unpacks into a `src` subdirectory of that one.
+          git init /home/builder/source
+          git -C /home/builder/source remote add origin "$QMDMM_REPO"
+          git -C /home/builder/source fetch --depth 1 origin "$QMDMM_REF"
+          git -C /home/builder/source checkout --detach FETCH_HEAD
+          echo "QMdmm HEAD: $(git -C /home/builder/source log --oneline -1)"
+          pkgver=$(sed -n 's/^pkgver=//p' packaging/alpine/APKBUILD)
+          git -C /home/builder/source archive --format=tar.gz \
+            --prefix="qmdmm-$pkgver/" \
+            -o "/home/builder/qmdmm/qmdmm-$pkgver.tar.gz" FETCH_HEAD
+          chown -R builder:abuild /home/builder/qmdmm
+          ls -l /home/builder/qmdmm
+
+      - name: Re-derive the source pin, then build and sign the packages
+        run: |
+          set -euxo pipefail
+          before=$(sed -n '/^sha512sums=/{n;p;}' /home/builder/qmdmm/APKBUILD)
+          su builder -c "cd /home/builder/qmdmm && HOME=/home/builder abuild checksum"
+          after=$(sed -n '/^sha512sums=/{n;p;}' /home/builder/qmdmm/APKBUILD)
+          {
+            echo '### The source pin'
+            echo
+            echo 'The recipe carries a sha512 pin for the tarball that was verified'
+            echo 'locally, and this run packages whatever `QMDMM_REF` points at, so'
+            echo 'the tarball is generated here and the pin is re-derived from it.'
+            echo 'The pin still does its job: a tarball that is not the one just'
+            echo 'generated does not match it.'
+            echo
+            echo '```'
+            echo "committed: $before"
+            echo "this run:  $after"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # No -d. It means "do not resolve dependencies" and would short-circuit
+          # exactly what this stage exists to check; it was only ever needed
+          # because proot cannot run the setuid helper.
+          su builder -c "cd /home/builder/qmdmm && HOME=/home/builder PACKAGER_PRIVKEY=/home/builder/.abuild/$PACKAGER_KEY.rsa abuild -r"
+
+      - name: Collect the packages and record their real names
+        run: |
+          set -euxo pipefail
+          # Where abuild put them is discovered rather than assumed: the directory
+          # is named after the repository the image is pointed at, which is not
+          # something to guess at from here.
+          index=$(find /home/builder -name APKINDEX.tar.gz -print -quit)
+          if [ -z "$index" ]; then
+            echo "::error::abuild produced no APKINDEX.tar.gz"
+            exit 1
+          fi
+          repodir=$(dirname "$index")
+          echo "repository directory: $repodir"
+          mkdir -p out
+          cp -a "$repodir" out/
+
+          printf 'package\tversion\tfile\n' > out/MANIFEST.tsv
+          for f in out/*/*.apk; do
+            p=$(tar xzOf "$f" .PKGINFO | sed -n 's/^pkgname = //p')
+            v=$(tar xzOf "$f" .PKGINFO | sed -n 's/^pkgver = //p')
+            printf '%s\t%s\t%s\n' "$p" "$v" "$(basename "$f")" >> out/MANIFEST.tsv
+          done
+
+          {
+            echo '### Packages produced by `abuild -r`'
+            echo
+            echo '```'
+            cat out/MANIFEST.tsv
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Exact names, not suffixes: on Alpine the runtime package is plain
+          # `qmdmm`, with no Qt generation in it, which makes `qmdmm` a prefix of
+          # every other name and a suffix match useless.
+          missing=''
+          for want in qmdmm qmdmm-dev qmdmm-doc; do
+            awk -F'\t' -v n="$want" '$1 == n { found = 1 } END { exit !found }' \
+              out/MANIFEST.tsv || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing package(s):$missing"
+            exit 1
+          fi
+
+          # Every package and the index have to be signed by the key committed in
+          # packaging/alpine: that name is what apk looks up in /etc/apk/keys, so a
+          # repository signed by anything else is untrusted by construction.
+          expected=".SIGN.RSA.$PACKAGER_KEY.rsa.pub"
+          for f in out/*/*.apk out/*/APKINDEX.tar.gz; do
+            # The listing goes to a file, and only the signature members are
+            # printed: the documentation package has thousands of members, and a
+            # listing that big does not fit in a pipe buffer.
+            tar tzf "$f" > /tmp/members.txt
+            echo "### $(basename "$f"): $(wc -l < /tmp/members.txt) members, signature members:"
+            grep '^\.SIGN\.' /tmp/members.txt | sed -n 's/^/  /' || true
+            # Read from the file rather than piping the listing into `grep -q`:
+            # `grep -q` exits on its first match, which leaves the writer holding
+            # a pipe with nobody reading it - SIGPIPE, and `set -o pipefail` turns
+            # that into a failed step for a package that is signed perfectly well.
+            # It only shows up on the packages whose listing exceeds the pipe
+            # buffer, which is why it would look like a signature problem.
+            if ! grep -qxF "$expected" /tmp/members.txt; then
+              echo "::error::$(basename "$f") does not carry $expected"
+              exit 1
+            fi
+          done
+
+      - name: Dump the declared dependency metadata
+        run: |
+          set -euxo pipefail
+          {
+            echo '### Declared metadata as shipped'
+            echo
+            for f in out/*/*.apk; do
+              echo "#### \`$(basename "$f")\`"
+              echo '```'
+              tar xzOf "$f" .PKGINFO \
+                | grep -E '^(pkgname|pkgver|pkgdesc|depend|provides|size|origin) = ' || true
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-alpine
+          path: out
+          if-no-files-found: error
