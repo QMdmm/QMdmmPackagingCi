@@ -228,19 +228,33 @@ jobs:
           cp packaging/arch/PKGBUILD packaging/arch/.SRCINFO arch-build/
           # The recipe takes a local tarball rather than a codeload download; its
           # NOTES say how it was produced. The prefix is what makes the recipe's
-          # own `cd "$pkgname-$pkgver"` find the extracted tree.
+          # own `cd "$pkgname-$pkgver"` find the extracted tree. The output path is
+          # absolute on purpose: -C makes it relative to qmdmm-src, not to the
+          # workspace the build directory lives in.
           git -C qmdmm-src archive --format=tar.gz \
             --prefix="qmdmm-6-${pkgver}/" HEAD \
-            -o "arch-build/qmdmm-6-${pkgver}.tar.gz"
+            -o "$PWD/arch-build/qmdmm-6-${pkgver}.tar.gz"
           # The committed checksums pin the tarball of the one locally verified
           # build. A run packages whatever ref it was handed, so they have to
           # follow the tarball that was actually produced.
-          ( cd arch-build && updpkgsums )
-          # makepkg refuses to run as root and every step of a container job runs
-          # as root, so the build happens as an ordinary user. Stages B and C go
-          # back to root: installing is not building.
+          #
+          # The recipe pins Release, as a distribution package should; the build
+          # type is a dial on dispatched runs, and the other two lines hand it
+          # straight to CMake. It is applied to this copy rather than left to
+          # diverge, and the assertion is there so a recipe that stops pinning it
+          # fails loudly instead of quietly building something nobody asked for.
+          grep -q -- '-DCMAKE_BUILD_TYPE=Release' arch-build/PKGBUILD \
+            || { echo "::error::the recipe no longer pins CMAKE_BUILD_TYPE=Release"; exit 1; }
+          sed -i "s/-DCMAKE_BUILD_TYPE=Release/-DCMAKE_BUILD_TYPE=${{ env.QMDMM_BUILD_TYPE }}/" \
+            arch-build/PKGBUILD
+          # makepkg refuses to run as root, and every step of a container job runs
+          # as root, so both the checksum refresh and the build happen as an
+          # ordinary user - updpkgsums is a wrapper around makepkg and is not
+          # assumed to be any more forgiving. Stages B and C go back to root:
+          # installing is not building.
           useradd -m -s /bin/bash builder
           chown -R builder:builder arch-build
+          su builder -c "cd '$PWD/arch-build' && updpkgsums"
           su builder -c "cd '$PWD/arch-build' && makepkg -f --noconfirm"
           ls -l arch-build/*.pkg.tar.zst
 
