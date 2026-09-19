@@ -998,11 +998,18 @@ jobs:
           openssl pkey -in "$priv" -pubout -outform DER \
             | cmp - <(openssl pkey -pubin -in "$pub" -outform DER)
           install -m 644 -o builder -g abuild "$pub" "$priv.pub"
+          # The building container needs it in its trust store as well, and not
+          # only the consuming ones: `abuild -r` finishes by updating the
+          # repository index, and `apk index` verifies the signature of every
+          # package it indexes. Without the key here that last step fails once per
+          # package with "UNTRUSTED signature" - after the whole build, which is
+          # an expensive way to learn that the key was not where apk looks.
+          install -m 644 "$pub" /etc/apk/keys/
           # And ask abuild itself. This is the very first thing `abuild -r` does
           # ("check early if we have abuild key"), so finding out here costs
           # seconds instead of the whole build.
           su builder -c "HOME=/home/builder PACKAGER_PRIVKEY=$priv abuild-sign --installed"
-          echo "the secret and $pub are the same pair, and abuild-sign can use them"
+          echo "the secret and $pub are the same pair, abuild-sign can use them, and apk trusts the key"
 
       - name: Prepare the recipe and the source tarball
         run: |
