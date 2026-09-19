@@ -1454,13 +1454,16 @@ jobs:
         run: |
           set -euxo pipefail
           # What a user already has before trying to build a GUI application: a
-          # compiler, CMake and a make. binutils is named because the QML check
-          # below reads the rebuilt binary with `strings`, pkgconf because Qt's own
-          # CMake files want it - the Debian line installs pkg-config for the same
+          # C and C++ compiler, CMake and a make - the Alpine equivalent of the
+          # Debian line's build-essential. g++ is a package of its own here and is
+          # not part of gcc; without it CMake finds no CXX compiler at all and
+          # fails at project(). binutils is named because the QML check below
+          # reads the rebuilt binary with `strings`, pkgconf because Qt's own CMake
+          # files want it - the Debian line installs pkg-config for the same
           # reason. Ninja is deliberately *not* installed: Alpine's cmake defaults
           # to it, but its ninja-build package puts the binary off PATH, which is
           # why every configure in this workflow asks for Unix Makefiles.
-          apk add --no-cache git ca-certificates gcc musl-dev make cmake pkgconf binutils
+          apk add --no-cache git ca-certificates gcc g++ musl-dev make cmake pkgconf binutils
 
       - name: Checkout this harness
         uses: actions/checkout@v7
