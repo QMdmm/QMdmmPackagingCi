@@ -12,6 +12,11 @@ container:
 | **B runtime** | In a *clean* container of the same distribution, does installing only the runtime package give a program that runs? |
 | **C dev** | In another clean container, is the dev package enough to build QMdmm's own GUI and Bot from source? |
 
+Stage A is one job per way of packaging — cpack for Debian and Fedora, abuild for
+Alpine — while stages B and C are matrix rows covering all three lines. The
+questions are therefore asked once per distribution, and a difference between
+distributions lives in the branch of a step rather than in a copy of it.
+
 ## Why the stages do not share a container
 
 Stage A has a full toolchain, Qt's development packages and the compiled source
@@ -27,7 +32,8 @@ local repository is the only way the declared inter-component dependencies
 actually get resolved rather than sidestepped.
 
 Every job begins by bringing its own image up to date (`apt-get update` +
-`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora). An image is a
+`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora, `apk update` +
+`apk upgrade --available` on Alpine). An image is a
 snapshot, and installing onto a stale one would blend two different things
 together: what the package under test declares, and whatever the base image was
 simply missing. Refreshing first is what makes everything that lands afterwards
@@ -54,15 +60,19 @@ The workflow does not hardcode these: stage A reads the real names back out of
 the produced packages and writes `MANIFEST.tsv`, and stages B and C select on the
 suffix recorded in the matrix. The suffixes in the matrix are therefore also an
 assertion — if a package ends up named something else, stage A fails. Alpine is
-the exception on both counts: `qmdmm` is a prefix of every other name there, so a
-suffix match would prove nothing, and its stages select on the exact names
-`qmdmm`, `qmdmm-dev` and `qmdmm-doc`.
+the exception on the packaging side: `qmdmm` is a prefix of every other name
+there, so a suffix match would prove nothing and that job asserts the three exact
+names instead. Its rows in stages B and C do select through the matrix, with a
+"suffix" that happens to be the whole name (`qmdmm`) because the runtime package
+carries no Qt generation.
 
 ## Acceptance criteria
 
 **Stage B** — after bringing the base up to date, installing only the runtime
-package and running the repair command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
-`dnf check --dependencies` audit on Fedora):
+package and repairing the dependency set (`apt-get -f install` on Debian, an
+idempotent `dnf install` plus a `dnf check --dependencies` audit on Fedora; apk
+resolves the whole transaction or fails, so on Alpine there is nothing to repair
+and the summary reports what the install added):
 
 * `ldd` reports **zero** unresolved libraries for every installed QMdmm binary
   and shared library.
@@ -86,7 +96,7 @@ package and running the repair command (`apt-get -f install` on Debian, an idemp
   the packaged stack.
 
 **Stage C** — after bringing the base up to date, installing only the dev package
-by name and running the same repair pass:
+by name and repairing the dependency set the same way:
 
 * `find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)` succeeds.
 * QMdmm's own `QMdmmGui`, `QMdmmBot` and `QMdmmServer` directories build through
@@ -115,8 +125,9 @@ instead.
 
 The "minimal" half of "minimal but complete" is reported rather than enforced:
 the job summary records what the repair pass had to add, and what installing only
-the dev package dragged in. Declaring the dependencies correctly is what makes
-that list empty.
+the dev package dragged in — on Alpine the difference the install made to the
+package set, since there is no repair pass there. Declaring the dependencies
+correctly is what makes that list empty.
 
 ## `consumer/`
 
