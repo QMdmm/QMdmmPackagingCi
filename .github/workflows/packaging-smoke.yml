@@ -450,8 +450,6 @@ jobs:
             expect: '-6 -6-devel -common-devel -doc'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
-            sfx_runtime: '-6'
-            sfx_dev: '-6-devel'
           - name: arch
             image: 'archlinux:base'
             kind: pac
@@ -949,8 +947,6 @@ jobs:
             image: 'fedora:latest'
             kind: rpm
             expect: '-6 -6-devel -common-devel -doc'
-            sfx_runtime: '-6'
-            sfx_dev: '-6-devel'
             sfx_runtime: '-6'
             sfx_dev: '-6-devel'
           - name: arch
