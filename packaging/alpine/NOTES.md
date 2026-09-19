@@ -10,7 +10,13 @@ write-up with the pitfall table: `nemn9852/qmdmm-maintenance#20`.
 
 ## Files
 
-- `APKBUILD` — the exact file used for the verified build (byte-for-byte).
+- `APKBUILD` — the file used for the verified build, plus one line added
+  afterwards for the CI line (`depends_dev`, see "Packaging-shape notes"). The
+  local verification installed its toolchain by hand and never built a consumer
+  against `-dev`, so a missing dependency declaration could not show up there.
+- `neve-6aaaace6.rsa.pub` — the public half of the signing key. The private half
+  is the `PACKAGER_PRIVKEY` secret in `QMdmm/QMdmmPackagingCi`; the CI line copies
+  this file into the consuming container's `/etc/apk/keys/`.
 
 ## Source tarball
 
@@ -81,9 +87,15 @@ that doesn't match (e.g. from a different git version or prefix).
   `x86_64/` (apk appends `<arch>/APKINDEX.tar.gz` itself — pointing at the arch
   dir yields a `x86_64/x86_64/` not-found). To install into a clean container
   without `--allow-untrusted`, copy the **public** key
-  (`~builder/.abuild/*.rsa.pub`) into its `/etc/apk/keys/`. The private key
-  never leaves the build container; in CI keep it as a secret or generate
-  per-run ephemeral ones.
+  (`~builder/.abuild/*.rsa.pub`) into its `/etc/apk/keys/` — in CI that is the
+  committed `neve-6aaaace6.rsa.pub` next to this file. Signing cannot be switched
+  off: abuild calls `abuild-sign` for the packages and for the repository index
+  unconditionally and dies without a key, so the CI line signs with a long-lived
+  key rather than a per-run `abuild-keygen`. The public half is committed here,
+  the private half is the `PACKAGER_PRIVKEY` secret. abuild derives the signature
+  file name from the private key's own file name and apk resolves that name in
+  `/etc/apk/keys`, so the secret has to keep this file's basename — the workflow
+  asserts the two halves are the same pair before building anything.
 
 ## Packaging-shape notes (read before "fixing" anything)
 
@@ -101,6 +113,14 @@ that doesn't match (e.g. from a different git version or prefix).
   is no Debian-style `qml6-module-*` counterpart to add either. Runtime `so:`
   deps are completed automatically by scanelf; the three names above are the
   human-readable floor.
+- **`depends_dev` declares the Qt development packages, mirroring deb and rpm.**
+  abuild's default `split_dev` gives `-dev` the runtime package (version-locked)
+  and the `so:` closure of its symlinks, which is the runtime libraries only —
+  nothing to configure or compile against. Same set as
+  `CPACK_DEBIAN_DEV6_PACKAGE_DEPENDS` in QMdmm's root CMakeLists, in Alpine's own
+  names. Added for the CI line, whose stage C builds a consumer from the installed
+  `qmdmm-dev` alone (`find_package(Qt6 ...)` has to succeed there); the local run
+  never did that, so it could not have caught the omission.
 - `options="!check !debug"`: 0.0.1 keeps size sane (debug subpackages off), and
   `check()` was intentionally not wired (build ran with `BUILD_TESTING=OFF`).
   When adding it later: `-DBUILD_TESTING=ON` + `ctest` for `tst_qmdmm_smoke6`.

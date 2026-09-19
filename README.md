@@ -37,17 +37,26 @@ attributable to the packages being tested.
 
 The dev packages follow each distribution's own convention:
 
-| component | Debian | Fedora |
-|---|---|---|
-| `6` (runtime) | `qmdmm-6` | `qmdmm-6` |
-| `dev6` (dev) | `qmdmm-6-dev` | `qmdmm-6-devel` |
-| `dev-common` (headers) | `qmdmm-common-dev` | `qmdmm-common-devel` |
-| `doc` | `qmdmm-doc` | `qmdmm-doc` |
+| component | Debian | Fedora | Alpine |
+|---|---|---|---|
+| `6` (runtime) | `qmdmm-6` | `qmdmm-6` | `qmdmm` |
+| `dev6` (dev) | `qmdmm-6-dev` | `qmdmm-6-devel` | `qmdmm-dev` |
+| `dev-common` (headers) | `qmdmm-common-dev` | `qmdmm-common-devel` | (none) |
+| `doc` | `qmdmm-doc` | `qmdmm-doc` | `qmdmm-doc` |
+
+Alpine has one development package rather than two: abuild's default `split_dev`
+puts the headers, the dev `.so` symlinks and the CMake package config into
+`qmdmm-dev` together, so the components the deb and rpm lines split between `dev6`
+and `dev-common` all arrive in it. The name also carries no Qt generation, because
+Alpine splits by suffix convention rather than by an explicit package name.
 
 The workflow does not hardcode these: stage A reads the real names back out of
 the produced packages and writes `MANIFEST.tsv`, and stages B and C select on the
 suffix recorded in the matrix. The suffixes in the matrix are therefore also an
-assertion — if a package ends up named something else, stage A fails.
+assertion — if a package ends up named something else, stage A fails. Alpine is
+the exception on both counts: `qmdmm` is a prefix of every other name there, so a
+suffix match would prove nothing, and its stages select on the exact names
+`qmdmm`, `qmdmm-dev` and `qmdmm-doc`.
 
 ## Acceptance criteria
 
@@ -96,6 +105,14 @@ listens on `QHostAddress::Any`, which Qt maps to the dual-stack IPv6 wildcard, s
 its socket shows up in `tcp6`. If a container ever hides those files the harness
 warns and falls back to liveness rather than failing a sound package.
 
+One criterion differs by distribution. `timeout` is GNU coreutils' on Debian and
+Fedora and busybox's on Alpine, and busybox reports **143** (128 + SIGTERM) for a
+child it had to kill where coreutils reports **124**. The Alpine stages therefore
+accept `{0,124,143}` for anything they expect to survive, and filter the stderr of
+every program they start for the loader's and the kernel's own words for a failure
+(`error while loading`, `version ... not found`, `Segmentation`, `Aborted`)
+instead.
+
 The "minimal" half of "minimal but complete" is reported rather than enforced:
 the job summary records what the repair pass had to add, and what installing only
 the dev package dragged in. Declaring the dependencies correctly is what makes
@@ -124,6 +141,28 @@ downstream projects have to do: `QMdmmGui/src/mainwindow.cpp` hardcodes
 `qrc:/qt/qml/QMdmm/Gui/qml/main.qml`, and where a QML module's resources end up
 is decided by the QTP0001 policy, which that call sets. Without it the rebuilt
 GUI links, starts, and then shows an empty window.
+
+## The Alpine signing key
+
+Signing is not optional on Alpine: abuild calls `abuild-sign` for the packages and
+for the repository index unconditionally and dies without a key. This repository
+holds one half of a key pair and the repository settings hold the other.
+
+* `packaging/alpine/neve-6aaaace6.rsa.pub` — the public half, copied into the
+  consuming container's `/etc/apk/keys/` by stages B and C.
+* the `PACKAGER_PRIVKEY` secret — the private half, written to
+  `~builder/.abuild/neve-6aaaace6.rsa` in stage A, and nowhere else.
+
+The two file names have to agree: abuild derives each signature's file name from
+the private key's own file name and apk resolves that name in `/etc/apk/keys`, so
+a signature made with a differently named key is untrusted by construction. Stage
+A asserts the two halves are the same pair before it builds anything, which turns
+a mismatch into one clear message rather than an `UNTRUSTED signature` two stages
+later.
+
+The key is long-lived on purpose. The line could generate a throwaway key per run,
+as the local verification did, but then the public half committed here would mean
+nothing and no one could ever check a published package against it.
 
 ## Running it
 
@@ -154,9 +193,9 @@ Inputs (dispatched runs only):
   the packaging work (`packaging-consumer-support`) was merged into.
 * `build_type` — CMake build type, default `Release`.
 
-Images: `debian:sid` and `fedora:latest` (the rolling pointers). Pinning per
-release and adding `fedora:rawhide` as a non-blocking weekly run is left for a
-later pass, once the manual flow is stable.
+Images: `debian:sid`, `fedora:latest` and `alpine:latest` (the rolling pointers).
+Pinning per release and adding `fedora:rawhide` as a non-blocking weekly run is
+left for a later pass, once the manual flow is stable.
 
 ## Qt version matrix
 

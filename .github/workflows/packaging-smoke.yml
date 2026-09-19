@@ -17,6 +17,14 @@ name: Packaging smoke
 # development packages still installed, a missing runtime dependency would be
 # masked by them and "minimal but complete" could not be verified at all.
 #
+# Debian and Fedora share one set of jobs through a matrix because they differ
+# only in their package manager's vocabulary. Alpine does not fit that shape and
+# gets its own three jobs further down (see the note at the first of them): it
+# packages with abuild rather than cpack, its package names carry no Qt-generation
+# suffix, and its local repository has to be *signed* - apk, unlike apt and dnf,
+# will not install from one it cannot verify, and abuild offers no way to stop
+# signing.
+#
 # It runs on a schedule as well as on demand: every day the suite re-verifies
 # whatever `main` has become, so a packaging regression is caught within a day
 # instead of at the next release. The cron field is a dial, not a promise of a
@@ -81,6 +89,12 @@ env:
   # Containers start with LANG unset, so Qt switches itself to C.UTF-8 and says
   # so on every launch. Setting it here keeps that noise out of the probe logs.
   LANG: C.UTF-8
+  # The basename shared by the Alpine packager's two halves: the public key
+  # committed at packaging/alpine/<name>.rsa.pub, and the private key kept in the
+  # PACKAGER_PRIVKEY secret. abuild derives each signature's file name from the
+  # private key's own name and apk resolves that name in /etc/apk/keys, so the two
+  # file names have to agree for a package to be installable at all.
+  PACKAGER_KEY: neve-6aaaace6
 
 defaults:
   run:
@@ -895,6 +909,780 @@ jobs:
             echo '`QMdmmServer6` (the dev package drags the runtime in) and has to'
             echo 'get through - so a source build against the dev package really'
             echo 'talks to the packaged runtime.'
+            echo
+            echo '```'
+            grep -E 'QMdmm6_VERSION|QT_GENERATION|Qt6.*DIR' /tmp/consumer-configure.log | head -20 || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ============================================================ stage A alpine
+  # Alpine runs as its own set of jobs rather than as a third row in the matrix
+  # above, because the three stages are the only thing it has in common with deb
+  # and rpm. There is no cpack here: the package comes out of abuild and
+  # packaging/alpine/APKBUILD. The names carry no Qt-generation suffix
+  # (qmdmm / qmdmm-dev / qmdmm-doc), which makes `qmdmm` a prefix of every other
+  # name, so stages B and C select on exact names instead of on suffixes. And the
+  # local repository is a *signed* APKINDEX: apk will not install from one it
+  # cannot verify, and abuild gives no way to switch signing off - which is why
+  # this workflow holds a packager key at all. Folding that into the matrix would
+  # have meant a third branch in every single step body.
+  #
+  # The `build_type` input does not reach this stage: the recipe pins
+  # CMAKE_BUILD_TYPE=Release itself. It still reaches stage C's consumer build,
+  # as on the other lines.
+  pack-alpine:
+    name: "A pack (alpine)"
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install bash
+        # The image ships busybox ash alone, and this file declares bash as its
+        # shell, so bash has to arrive before anything else can run. This one step
+        # therefore asks for sh explicitly.
+        shell: sh
+        run: apk add --no-cache bash
+
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          # Same reasoning as the Debian and Fedora jobs: everything installed
+          # afterwards must be measured against a current archive rather than
+          # against a snapshot. `--available` is apk's dist-upgrade - every
+          # package may move to what the repositories have now.
+          apk update
+          apk upgrade --available
+
+      - name: Install the packager
+        run: |
+          set -euxo pipefail
+          # Deliberately the packager only. The local (proot) verification had to
+          # pre-install the whole toolchain and call abuild with -d, because proot
+          # does not emulate the setuid on abuild-sudo; a container is a real root
+          # environment where that helper works, so `abuild -r` resolves
+          # makedepends by itself. Pre-installing that closure here would quietly
+          # delete the most valuable thing this stage verifies.
+          apk add --no-cache abuild fakeroot scanelf git ca-certificates openssl tar
+          # abuild refuses to run as root, and the abuild package already created
+          # the group its setuid helper authorizes through (gid 300): the group is
+          # not created here and its gid is not pinned.
+          adduser -D -G abuild builder
+          id builder
+
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Install the packager key
+        env:
+          PRIVKEY: ${{ secrets.PACKAGER_PRIVKEY }}
+        run: |
+          set -euxo pipefail
+          if [ -z "$PRIVKEY" ]; then
+            echo "::error::the PACKAGER_PRIVKEY secret is not set, and abuild cannot sign a package without a key"
+            exit 1
+          fi
+          key="/home/builder/.abuild/$PACKAGER_KEY.rsa"
+          install -d -m 700 -o builder -g builder /home/builder/.abuild
+          printf '%s\n' "$PRIVKEY" > "$key"
+          chown builder:builder "$key"
+          chmod 600 "$key"
+          # The public half is committed next to the APKBUILD and is what the
+          # consuming containers copy into /etc/apk/keys. abuild names each
+          # signature after the private key's own file name, and apk resolves that
+          # name in /etc/apk/keys, so the halves have to be a pair and the file
+          # names have to agree - a mismatch would otherwise surface two stages
+          # later as a bare "UNTRUSTED signature". Assert both up front, while the
+          # message can still say what is wrong.
+          openssl pkey -in "$key" -pubout -outform DER \
+            | cmp - <(openssl pkey -pubin -in "packaging/alpine/$PACKAGER_KEY.rsa.pub" -outform DER)
+          echo "the secret and packaging/alpine/$PACKAGER_KEY.rsa.pub are the same pair"
+
+      - name: Prepare the recipe and the source tarball
+        run: |
+          set -euxo pipefail
+          install -d -m 755 -o builder -g builder /home/builder/qmdmm
+          install -m 644 -o builder -g builder packaging/alpine/APKBUILD /home/builder/qmdmm/APKBUILD
+          # A git tree rather than a codeload download: `git archive` is what
+          # produces the layout abuild looks for, and the prefix has to be
+          # $pkgname-$pkgver or abuild will not find the directory it expects to
+          # unpack into. The clone is kept out of the recipe directory on purpose,
+          # because abuild unpacks into a `src` subdirectory of that one.
+          git init /home/builder/source
+          git -C /home/builder/source remote add origin "$QMDMM_REPO"
+          git -C /home/builder/source fetch --depth 1 origin "$QMDMM_REF"
+          git -C /home/builder/source checkout --detach FETCH_HEAD
+          echo "QMdmm HEAD: $(git -C /home/builder/source log --oneline -1)"
+          pkgver=$(sed -n 's/^pkgver=//p' packaging/alpine/APKBUILD)
+          git -C /home/builder/source archive --format=tar.gz \
+            --prefix="qmdmm-$pkgver/" \
+            -o "/home/builder/qmdmm/qmdmm-$pkgver.tar.gz" FETCH_HEAD
+          chown -R builder:builder /home/builder/qmdmm
+          ls -l /home/builder/qmdmm
+
+      - name: Re-derive the source pin, then build and sign the packages
+        run: |
+          set -euxo pipefail
+          before=$(grep -A1 '^sha512sums=' /home/builder/qmdmm/APKBUILD | tail -1)
+          su builder -c "cd /home/builder/qmdmm && HOME=/home/builder abuild checksum"
+          after=$(grep -A1 '^sha512sums=' /home/builder/qmdmm/APKBUILD | tail -1)
+          {
+            echo '### The source pin'
+            echo
+            echo 'The recipe carries a sha512 pin for the tarball that was verified'
+            echo 'locally, and this run packages whatever `QMDMM_REF` points at, so'
+            echo 'the tarball is generated here and the pin is re-derived from it.'
+            echo 'The pin still does its job: a tarball that is not the one just'
+            echo 'generated does not match it.'
+            echo
+            echo '```'
+            echo "committed: $before"
+            echo "this run:  $after"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # No -d. It means "do not resolve dependencies" and would short-circuit
+          # exactly what this stage exists to check; it was only ever needed
+          # because proot cannot run the setuid helper.
+          su builder -c "cd /home/builder/qmdmm && HOME=/home/builder PACKAGER_PRIVKEY=/home/builder/.abuild/$PACKAGER_KEY.rsa abuild -r"
+
+      - name: Collect the packages and record their real names
+        run: |
+          set -euxo pipefail
+          # Where abuild put them is discovered rather than assumed: the directory
+          # is named after the repository the image is pointed at, which is not
+          # something to guess at from here.
+          index=$(find /home/builder -name APKINDEX.tar.gz -print -quit)
+          if [ -z "$index" ]; then
+            echo "::error::abuild produced no APKINDEX.tar.gz"
+            exit 1
+          fi
+          repodir=$(dirname "$index")
+          echo "repository directory: $repodir"
+          mkdir -p out
+          cp -a "$repodir" out/
+
+          printf 'package\tversion\tfile\n' > out/MANIFEST.tsv
+          for f in out/*/*.apk; do
+            p=$(tar xzOf "$f" .PKGINFO | sed -n 's/^pkgname = //p')
+            v=$(tar xzOf "$f" .PKGINFO | sed -n 's/^pkgver = //p')
+            printf '%s\t%s\t%s\n' "$p" "$v" "$(basename "$f")" >> out/MANIFEST.tsv
+          done
+
+          {
+            echo '### Packages produced by `abuild -r`'
+            echo
+            echo '```'
+            cat out/MANIFEST.tsv
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # Exact names, not suffixes: on Alpine the runtime package is plain
+          # `qmdmm`, with no Qt generation in it, which makes `qmdmm` a prefix of
+          # every other name and a suffix match useless.
+          missing=''
+          for want in qmdmm qmdmm-dev qmdmm-doc; do
+            awk -F'\t' -v n="$want" '$1 == n { found = 1 } END { exit !found }' \
+              out/MANIFEST.tsv || missing="$missing $want"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::missing package(s):$missing"
+            exit 1
+          fi
+
+          # Every package and the index have to be signed by the key committed in
+          # packaging/alpine: that name is what apk looks up in /etc/apk/keys, so a
+          # repository signed by anything else is untrusted by construction.
+          expected=".SIGN.RSA.$PACKAGER_KEY.rsa.pub"
+          for f in out/*/*.apk out/*/APKINDEX.tar.gz; do
+            members=$(tar tzf "$f")
+            echo "### members of $(basename "$f")"
+            echo "$members" | sed -n 's/^/  /'
+            if ! echo "$members" | grep -qxF "$expected"; then
+              echo "::error::$(basename "$f") does not carry $expected"
+              exit 1
+            fi
+          done
+
+      - name: Dump the declared dependency metadata
+        run: |
+          set -euxo pipefail
+          {
+            echo '### Declared metadata as shipped'
+            echo
+            for f in out/*/*.apk; do
+              echo "#### \`$(basename "$f")\`"
+              echo '```'
+              tar xzOf "$f" .PKGINFO \
+                | grep -E '^(pkgname|pkgver|pkgdesc|depend|provides|size|origin) = ' || true
+              echo '```'
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-alpine
+          path: out
+          if-no-files-found: error
+
+  # ============================================================ stage B alpine
+  verify-runtime-alpine:
+    name: "B runtime (alpine)"
+    needs: pack-alpine
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install bash
+        shell: sh
+        run: apk add --no-cache bash
+
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          apk update
+          apk upgrade --available
+
+      - name: Install the inspection tooling
+        run: |
+          set -euxo pipefail
+          # ldd comes from musl-utils here - same criterion as on the glibc lines,
+          # a different implementation of it - and the QML assertion further down
+          # reads a binary with `strings` from binutils. git and ca-certificates
+          # are for the checkout step below (the checkout action shells out to
+          # git), not for the package under test: both are installed *before* the
+          # install snapshot further down, so neither can be mistaken for
+          # something the package dragged in.
+          apk add --no-cache binutils musl-utils git ca-certificates
+          command -v ldd
+
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-alpine
+          path: pkgs
+
+      - name: Trust the packager key and publish the packages as a local repository
+        run: |
+          set -euxo pipefail
+          # This step has no counterpart on the Debian and Fedora lines: neither
+          # apt nor dnf refuses an unsigned local repository, so those lines never
+          # have to answer the signing question at all. apk does refuse one, and
+          # abuild offers no way to turn signing off, so the public key has to be
+          # in place before the repository is added - otherwise apk rejects the
+          # index as UNTRUSTED.
+          install -m 644 "packaging/alpine/$PACKAGER_KEY.rsa.pub" /etc/apk/keys/
+          # The repository is the *parent* of the arch directory: apk appends
+          # <arch>/APKINDEX.tar.gz itself, so pointing at the arch directory makes
+          # it look for <arch>/<arch>/APKINDEX.tar.gz.
+          echo "file://$PWD/pkgs" >> /etc/apk/repositories
+          cat /etc/apk/repositories
+          apk update
+
+      - name: Install the runtime package and audit the dependency set
+        run: |
+          set -euxo pipefail
+          # Installing by name only succeeds if the package declares its own
+          # dependencies - which is the point. apk resolves the whole transaction
+          # or fails, so unlike the Debian line there is nothing to repair
+          # afterwards; the second install is idempotent and kept only so the two
+          # lines read alike.
+          # What gets reported is the difference the install made, which is the
+          # honest analogue of the Debian line's repair log - the full list would
+          # include the inspection tooling installed above.
+          apk list --installed | sort > /tmp/before.txt
+          apk add qmdmm
+          apk add qmdmm
+          apk list --installed | sort > /tmp/after.txt
+          # `apk list` rather than `apk info -e`: apk-tools 3 moved that question to
+          # `apk list`, and `alpine:latest` can move under this workflow. A file
+          # rather than a pipe into grep, because with pipefail a grep that exits
+          # early can turn a found match into a SIGPIPE failure.
+          grep -qE '^qmdmm-[0-9]' /tmp/after.txt \
+            || { echo "::error::qmdmm is not installed"; exit 1; }
+          {
+            echo '### Runtime install: what installing qmdmm added'
+            echo
+            echo '```'
+            comm -13 /tmp/before.txt /tmp/after.txt
+            echo '```'
+            echo
+            echo "added: $(comm -13 /tmp/before.txt /tmp/after.txt | wc -l) packages"
+            echo "installed in total: $(wc -l < /tmp/after.txt)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check that every installed QMdmm binary and library resolves
+        run: |
+          # GitHub runs the step body with -e, and every assertion below is about
+          # a non-zero exit status, so errexit is turned off explicitly.
+          set +e
+          set -uo pipefail
+          targets=$(ls /usr/bin/QMdmm6 /usr/bin/QMdmmBot6 /usr/bin/QMdmmServer6)
+          targets="$targets $(ls /usr/lib/*/libQMdmmCore6.so.* /usr/lib/*/libQMdmmNetworking6.so.* 2>/dev/null || true)"
+          targets="$targets $(ls /usr/lib/libQMdmmCore6.so.* /usr/lib/libQMdmmNetworking6.so.* 2>/dev/null || true)"
+          failed=0
+          for t in $targets; do
+            echo "### ldd $t"
+            ldd "$t" | tee /tmp/ldd.log
+            if grep -q 'not found' /tmp/ldd.log; then
+              echo "::error::$t has unresolved shared libraries"
+              failed=1
+            fi
+          done
+          [ "$failed" -eq 0 ]
+
+      - name: Run the installed programs
+        run: |
+          # GitHub runs the step body with -e, and every assertion below is about
+          # a non-zero exit status, so errexit is turned off explicitly.
+          set +e
+          set -uo pipefail
+          export QT_QPA_PLATFORM=offscreen
+          failed=0
+
+          # busybox timeout reports 143 (128 + SIGTERM) for a child it had to
+          # kill, where GNU coreutils reports 124. Surviving therefore means 0,
+          # 124 or 143 - and only those three, which is why which timeout this is
+          # gets written down instead of assumed.
+          survived() { case "$1" in 0|124|143) return 0 ;; *) return 1 ;; esac; }
+          # The Alpine-flavored fatal filter: the first two are the dynamic loader
+          # complaining in musl's own words, the rest are a crash.
+          fatal() {
+            grep -qiE 'error while loading|version .* not found|undefined symbol|symbol lookup error|Segmentation|Aborted' "$1"
+          }
+
+          # Seeing the connection the server accepted is what turns "the bot is
+          # running" into "the bot really reached the server". That is read out of
+          # the kernel's socket tables, where QMdmm's default TCP port 6366 spells
+          # 18DE and 0A/01 mean LISTEN/ESTABLISHED. If the container ever hides
+          # those files, warn and fall back to liveness: a blind harness must not
+          # fail an otherwise sound package, and the warning says the check was
+          # skipped.
+          port_hex=18DE
+          net_files=''
+          for f in /proc/net/tcp /proc/net/tcp6; do
+            if [ -r "$f" ]; then net_files="$net_files $f"; fi
+          done
+          net_visible=0
+          [ -n "$net_files" ] && net_visible=1
+          # Both tables, deliberately: the server listens on QHostAddress::Any,
+          # which Qt maps to the dual-stack IPv6 wildcard, so its socket lives in
+          # tcp6 - and the address width differs between the two files, hence the
+          # unanchored [0-9A-F]+. $net_files is meant to word-split.
+          is_listening() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +0A" $net_files; }
+          is_connected() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +01" $net_files; }
+          if [ "$net_visible" -eq 0 ]; then
+            echo "::warning::neither /proc/net/tcp nor /proc/net/tcp6 is readable here; the connection checks are skipped"
+          fi
+
+          {
+            echo '### Programs started from the installed runtime package'
+            echo
+            echo 'rc 124 is GNU timeout and rc 143 is busybox timeout; both mean the'
+            echo 'program was still running when the timeout hit, which is what a GUI,'
+            echo 'a server and a bot are supposed to do.'
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          # The GUI is the only program that runs on its own.
+          timeout 20 /usr/bin/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
+          rc=$?
+          echo "### /usr/bin/QMdmm6 rc=$rc"
+          sed -e 's/^/  err| /' /tmp/gui.err
+          if ! survived "$rc"; then
+            echo "::error::QMdmm6 exited with rc=$rc"
+            failed=1
+          fi
+          if fatal /tmp/gui.err; then
+            echo "::error::QMdmm6 reported a fatal dynamic linking or crash message"
+            failed=1
+          fi
+          # Staying alive is not the whole story for a GUI: with the QML resource
+          # prefix wrong it does exactly that and still shows an empty window,
+          # complaining only that its own qrc path is missing. Same assertion as
+          # the rebuilt GUI in stage C - the packaged GUI has to resolve its QML
+          # out of its own resources, not out of the build tree.
+          if grep -q 'No such file or directory' /tmp/gui.err; then
+            echo "::error::the installed GUI could not resolve its QML out of its own resources"
+            failed=1
+          fi
+          # That warning is only a negative, so also ask the binary itself. The
+          # path below is both what QMdmmGui/src/mainwindow.cpp asks the resource
+          # system for and where the QTP0001 policy puts a QML module's resources,
+          # so the two agreeing is exactly what has to hold. Qt keeps these strings
+          # as UTF-16 - an ASCII grep finds nothing at all - hence `strings -e l`,
+          # and `-a` so the whole file is read rather than the data sections.
+          # Deliberately not main.qml: mainwindow.cpp spells that path out in a
+          # literal of its own, so it is compiled in whether the prefix is right or
+          # not. A name only the compiled QML table carries moves with the prefix;
+          # this was measured against a build with the prefix forced wrong (it
+          # drops from one occurrence to none).
+          strings -a -e l /usr/bin/QMdmm6 >/tmp/gui.strings
+          if ! grep -q '/qt/qml/QMdmm/Gui/qml/GameScene.qml' /tmp/gui.strings; then
+            echo "::error::the installed GUI does not carry its QML at qrc:/qt/qml/QMdmm/Gui/qml"
+            failed=1
+          fi
+
+          # The server calls qFatal() when it cannot listen, which aborts with a
+          # non-zero status, so staying alive is what "it runs" means here.
+          /usr/bin/QMdmmServer6 >/tmp/server.out 2>/tmp/server.err &
+          server_pid=$!
+          for _ in $(seq 1 40); do
+            kill -0 "$server_pid" 2>/dev/null || break
+            if [ "$net_visible" -eq 1 ] && is_listening; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$server_pid" 2>/dev/null; then
+            echo "### /usr/bin/QMdmmServer6 is running"
+            if [ "$net_visible" -eq 1 ] && ! is_listening; then
+              echo "::error::QMdmmServer6 is up but nothing is listening on TCP 6366"
+              failed=1
+            fi
+          else
+            wait "$server_pid"
+            rc=$?
+            sed -e 's/^/  err| /' /tmp/server.err
+            echo "::error::QMdmmServer6 exited with rc=$rc"
+            failed=1
+          fi
+          if fatal /tmp/server.err; then
+            echo "::error::QMdmmServer6 reported a fatal dynamic linking or crash message"
+            failed=1
+          fi
+
+          # The bot refuses to start at all without --host (it exits 3 instead of
+          # running) and, with one, it stays in its event loop forever: an exit
+          # status alone cannot tell "connected" from "dialling a host that never
+          # answers", because the client simply retries. The proof is the accepted
+          # connection on the server side, which only exists once the packaged
+          # client really got through over the packaged stack.
+          /usr/bin/QMdmmBot6 --host=qmdmm://localhost:6366 >/tmp/bot.out 2>/tmp/bot.err &
+          bot_pid=$!
+          bot_connected=0
+          for _ in $(seq 1 60); do
+            kill -0 "$bot_pid" 2>/dev/null || break
+            if is_connected; then bot_connected=1; break; fi
+            sleep 0.25
+          done
+          if kill -0 "$bot_pid" 2>/dev/null; then
+            echo "### /usr/bin/QMdmmBot6 is up and in its event loop"
+          else
+            wait "$bot_pid"
+            rc=$?
+            echo "::error::QMdmmBot6 exited with rc=$rc instead of staying connected"
+            failed=1
+          fi
+          sed -e 's/^/  err| /' /tmp/bot.err
+          if fatal /tmp/bot.err; then
+            echo "::error::QMdmmBot6 reported a fatal dynamic linking or crash message"
+            failed=1
+          fi
+          if [ "$bot_connected" -eq 1 ]; then
+            echo "### /usr/bin/QMdmmBot6 connected to /usr/bin/QMdmmServer6 over TCP"
+          elif [ "$net_visible" -eq 1 ]; then
+            echo "::error::no established connection on port 6366: the bot never reached the server"
+            # Leave evidence behind: which sockets the kernel does know about says
+            # far more than "it did not work". 02 is SYN_SENT (nothing is
+            # answering), 04/06 mean the handshake finished and the far end then
+            # closed, 01 means it is up right now.
+            echo "### Sockets referencing port 6366 after the failure:"
+            grep -hE ":${port_hex} " $net_files || echo '(none at all)'
+            failed=1
+          fi
+
+          # The server's own log is the other side of that connection.
+          server_log=$(ls -1t /var/QMdmm/log/QMdmmServer-* 2>/dev/null | head -1)
+          if [ -n "$server_log" ] && [ -s "$server_log" ]; then
+            {
+              echo "### Server-side log (\`$server_log\`)"
+              echo
+              echo '```'
+              tail -40 "$server_log"
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+          kill "$bot_pid" "$server_pid" 2>/dev/null
+          wait 2>/dev/null
+
+          [ "$failed" -eq 0 ]
+
+  # ============================================================ stage C alpine
+  verify-dev-alpine:
+    name: "C dev (alpine)"
+    needs: pack-alpine
+    runs-on: ubuntu-latest
+    container:
+      image: alpine:latest
+    steps:
+      - name: Install bash
+        shell: sh
+        run: apk add --no-cache bash
+
+      - name: Bring the base image up to date
+        run: |
+          set -euxo pipefail
+          apk update
+          apk upgrade --available
+
+      - name: Install a plain build toolchain
+        run: |
+          set -euxo pipefail
+          # What a user already has before trying to build a GUI application: a
+          # compiler, CMake and a make. binutils is named because the QML check
+          # below reads the rebuilt binary with `strings`, pkgconf because Qt's own
+          # CMake files want it - the Debian line installs pkg-config for the same
+          # reason. Ninja is deliberately *not* installed: Alpine's cmake defaults
+          # to it, but its ninja-build package puts the binary off PATH, which is
+          # why every configure in this workflow asks for Unix Makefiles.
+          apk add --no-cache git ca-certificates gcc musl-dev make cmake pkgconf binutils
+
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-alpine
+          path: pkgs
+
+      - name: Trust the packager key and publish the packages as a local repository
+        run: |
+          set -euxo pipefail
+          # Same as stage B: the key has to be in place before the repository is,
+          # or apk rejects the index as UNTRUSTED. See the note there.
+          install -m 644 "packaging/alpine/$PACKAGER_KEY.rsa.pub" /etc/apk/keys/
+          echo "file://$PWD/pkgs" >> /etc/apk/repositories
+          cat /etc/apk/repositories
+          apk update
+
+      - name: Install the dev package and audit the dependency set
+        run: |
+          set -euxo pipefail
+          # Installing the dev package by name only succeeds if it declares its
+          # own runtime, documentation and Qt dependencies - which is the point.
+          # apk resolves the whole transaction or fails, so there is no repair
+          # pass to run afterwards as there is on the Debian line.
+          apk list --installed | sort > /tmp/before.txt
+          apk add qmdmm-dev
+          apk list --installed | sort > /tmp/after.txt
+          # `apk list` rather than `apk info -e`, for the reason given in stage B.
+          grep -qE '^qmdmm-dev-[0-9]' /tmp/after.txt \
+            || { echo "::error::qmdmm-dev is not installed"; exit 1; }
+          # The runtime package has to arrive with it, not have been installed by
+          # hand above.
+          grep -qE '^qmdmm-[0-9]' /tmp/after.txt \
+            || { echo "::error::qmdmm did not come with the dev package"; exit 1; }
+
+      - name: Report what the dev package dragged in
+        run: |
+          set -euxo pipefail
+          # The difference the dev package made to the package set. Everything
+          # listed here is something `qmdmm-dev` declared - including the Qt
+          # development packages, which is where `depends_dev` in the APKBUILD
+          # earns its keep: apk installs nothing beyond what a package declares.
+          {
+            echo '### What installing only the dev package added'
+            echo
+            echo '```'
+            comm -13 /tmp/before.txt /tmp/after.txt
+            echo '```'
+            echo
+            echo "added: $(comm -13 /tmp/before.txt /tmp/after.txt | wc -l) packages"
+            echo "installed in total: $(wc -l < /tmp/after.txt)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Fetch the QMdmm sources for the GUI and Bot
+        run: |
+          set -euxo pipefail
+          git init qmdmm-src
+          git -C qmdmm-src remote add origin "$QMDMM_REPO"
+          git -C qmdmm-src fetch --depth 1 origin "$QMDMM_REF"
+          git -C qmdmm-src checkout --detach FETCH_HEAD
+
+      - name: Build the consumer project against the installed package
+        run: |
+          set -euxo pipefail
+          # Unix Makefiles for the reason spelled out in the toolchain step.
+          cmake -S consumer -B consumer-build -G "Unix Makefiles" \
+            -DCMAKE_BUILD_TYPE='${{ env.QMDMM_BUILD_TYPE }}' \
+            -DQMDMM_SOURCE_DIR="$PWD/qmdmm-src" 2>&1 | tee /tmp/consumer-configure.log
+          cmake --build consumer-build --parallel
+
+      - name: Verify the executables the consumer produced
+        run: |
+          # GitHub runs the step body with -e, and every assertion below is about
+          # a non-zero exit status, so errexit is turned off explicitly.
+          set +e
+          set -uo pipefail
+          failed=0
+          for exe in consumer-build/qmdmm-gui/QMdmm6 \
+                     consumer-build/qmdmm-bot/QMdmmBot6 \
+                     consumer-build/qmdmm-server/QMdmmServer6; do
+            if [ -x "$exe" ]; then
+              echo "### built: $exe"
+              ldd "$exe" | tee /tmp/ldd.log
+              if grep -q 'not found' /tmp/ldd.log; then
+                echo "::error::$exe has unresolved shared libraries"
+                failed=1
+              fi
+            else
+              echo "::error::$exe was not produced"
+              failed=1
+            fi
+          done
+
+          export QT_QPA_PLATFORM=offscreen
+
+          # Same criteria as stage B: busybox timeout reports 143 where GNU
+          # coreutils reports 124, and musl's loader phrases a missing library its
+          # own way.
+          survived() { case "$1" in 0|124|143) return 0 ;; *) return 1 ;; esac; }
+          fatal() {
+            grep -qiE 'error while loading|version .* not found|undefined symbol|symbol lookup error|Segmentation|Aborted' "$1"
+          }
+
+          # Same connection probe as the runtime stage: 6366 reads 18DE in the
+          # kernel socket tables, 0A is LISTEN and 01 is ESTABLISHED. Falls back
+          # to liveness, with a warning, if those files are not readable here.
+          port_hex=18DE
+          net_files=''
+          for f in /proc/net/tcp /proc/net/tcp6; do
+            if [ -r "$f" ]; then net_files="$net_files $f"; fi
+          done
+          net_visible=0
+          [ -n "$net_files" ] && net_visible=1
+          is_listening() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +0A" $net_files; }
+          is_connected() { grep -qE ":${port_hex} +[0-9A-F]+:[0-9A-F]{4} +01" $net_files; }
+          if [ "$net_visible" -eq 0 ]; then
+            echo "::warning::neither /proc/net/tcp nor /proc/net/tcp6 is readable here; the connection checks are skipped"
+          fi
+
+          timeout 20 consumer-build/qmdmm-gui/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
+          rc=$?
+          echo "### rebuilt GUI rc=$rc"
+          sed -e 's/^/  err| /' /tmp/gui.err
+          if ! survived "$rc"; then
+            echo "::error::rebuilt GUI exited with rc=$rc"
+            failed=1
+          fi
+          if fatal /tmp/gui.err; then
+            echo "::error::the rebuilt GUI reported a fatal dynamic linking or crash message"
+            failed=1
+          fi
+          # Linking and staying alive is not the whole story for this one: with the
+          # QML resource prefix wrong it does both of those and still shows an
+          # empty window, complaining only that its own qrc path is missing.
+          if grep -q 'No such file or directory' /tmp/gui.err; then
+            echo "::error::the rebuilt GUI could not resolve its QML out of its own resources"
+            failed=1
+          fi
+          # Same static check as stage B, with the same reasoning. It matters more
+          # here: what decides the prefix for this build is the consumer's own
+          # qt6_standard_project_setup, and leaving that out is a mistake this
+          # harness has made once already - the GUI then links, starts, and shows
+          # an empty window.
+          strings -a -e l consumer-build/qmdmm-gui/QMdmm6 >/tmp/rgui.strings
+          if ! grep -q '/qt/qml/QMdmm/Gui/qml/GameScene.qml' /tmp/rgui.strings; then
+            echo "::error::the rebuilt GUI does not carry its QML at qrc:/qt/qml/QMdmm/Gui/qml"
+            failed=1
+          fi
+
+          # The rebuilt server on its own first, while 6366 is still free; the
+          # installed one below needs that port.
+          timeout 10 consumer-build/qmdmm-server/QMdmmServer6 >/tmp/rserver.out 2>/tmp/rserver.err
+          rc=$?
+          echo "### rebuilt Server rc=$rc"
+          sed -e 's/^/  err| /' /tmp/rserver.err
+          if ! survived "$rc"; then
+            echo "::error::rebuilt Server exited with rc=$rc"
+            failed=1
+          fi
+          if fatal /tmp/rserver.err; then
+            echo "::error::the rebuilt Server reported a fatal dynamic linking or crash message"
+            failed=1
+          fi
+
+          # The rebuilt bot is pointed at the *installed* server, which the dev
+          # package dragged in as its runtime dependency. That closes the loop: a
+          # source build against the dev package talking to the packaged runtime.
+          /usr/bin/QMdmmServer6 >/tmp/server.out 2>/tmp/server.err &
+          server_pid=$!
+          for _ in $(seq 1 40); do
+            kill -0 "$server_pid" 2>/dev/null || break
+            if [ "$net_visible" -eq 1 ] && is_listening; then break; fi
+            sleep 0.25
+          done
+          if kill -0 "$server_pid" 2>/dev/null; then
+            echo "### the installed /usr/bin/QMdmmServer6 is running"
+            if [ "$net_visible" -eq 1 ] && ! is_listening; then
+              echo "::error::the installed QMdmmServer6 is up but nothing is listening on TCP 6366"
+              failed=1
+            fi
+          else
+            wait "$server_pid"
+            rc=$?
+            sed -e 's/^/  err| /' /tmp/server.err
+            echo "::error::the installed QMdmmServer6 exited with rc=$rc"
+            failed=1
+          fi
+
+          # Without --host the bot exits 3; with one it stays in its event loop
+          # even when nothing answers, so the accepted connection - not the exit
+          # status - is what proves it really got through.
+          consumer-build/qmdmm-bot/QMdmmBot6 --host=qmdmm://localhost:6366 \
+            >/tmp/bot.out 2>/tmp/bot.err &
+          bot_pid=$!
+          bot_connected=0
+          for _ in $(seq 1 60); do
+            kill -0 "$bot_pid" 2>/dev/null || break
+            if is_connected; then bot_connected=1; break; fi
+            sleep 0.25
+          done
+          if kill -0 "$bot_pid" 2>/dev/null; then
+            echo "### the rebuilt Bot is up and in its event loop"
+          else
+            wait "$bot_pid"
+            rc=$?
+            echo "::error::the rebuilt Bot exited with rc=$rc instead of staying connected"
+            failed=1
+          fi
+          sed -e 's/^/  err| /' /tmp/bot.err
+          if fatal /tmp/bot.err; then
+            echo "::error::the rebuilt Bot reported a fatal dynamic linking or crash message"
+            failed=1
+          fi
+          if [ "$bot_connected" -eq 1 ]; then
+            echo "### the rebuilt Bot connected to the installed server over TCP"
+          elif [ "$net_visible" -eq 1 ]; then
+            echo "::error::no established connection on port 6366: the rebuilt Bot never reached the server"
+            echo "### Sockets referencing port 6366 after the failure:"
+            grep -hE ":${port_hex} " $net_files || echo '(none at all)'
+            failed=1
+          fi
+
+          kill "$bot_pid" "$server_pid" 2>/dev/null
+          wait 2>/dev/null
+
+          [ "$failed" -eq 0 ]
+
+      - name: Write the summary
+        if: always()
+        run: |
+          {
+            echo '### What the consumer project proved'
+            echo
+            echo '`consumer/` links nothing but the installed package:'
+            echo '`find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)`,'
+            echo 'then QMdmm''s own QMdmmGui, QMdmmBot and QMdmmServer sources are'
+            echo 'added with `add_subdirectory` and resolved against `QMdmm6::Core`'
+            echo 'and `QMdmm6::Networking`. A green run means the dev package is'
+            echo 'sufficient to rebuild all three applications on Alpine - which on'
+            echo 'this line rests on `depends_dev` in packaging/alpine/APKBUILD'
+            echo 'carrying the Qt development packages, since apk installs nothing'
+            echo 'beyond what the package declares.'
             echo
             echo '```'
             grep -E 'QMdmm6_VERSION|QT_GENERATION|Qt6.*DIR' /tmp/consumer-configure.log | head -20 || true
