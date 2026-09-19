@@ -463,9 +463,10 @@ jobs:
           echo "runtime package: $runtime"
           # Installing by name only succeeds if the package declares its own
           # dependencies - which is the point. apk resolves the whole transaction
-          # or fails, so unlike the Debian line there is nothing to repair
-          # afterwards; the second install is idempotent and kept only so the two
-          # lines read alike.
+          # or fails, unlike apt, which will leave a half-configured system for
+          # `apt-get -f install` to repair: there is nothing to repair here. The
+          # second install is idempotent and only kept so this step reads like the
+          # other rows'.
           #
           # `apk list` rather than `apk info -e`: apk-tools 3 moved that question
           # to `apk list`, and `alpine:latest` can move under this workflow. A file
@@ -1140,7 +1141,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-  # ============================================================ stage A alpine
+  # =============================================================== stage A alpine
   # Stage A of the Alpine line is a job of its own: it shares no step with the
   # cpack job above. There is no cpack here - the package comes out of abuild and
   # packaging/alpine/APKBUILD - and the names carry no Qt-generation suffix
@@ -1372,5 +1373,3 @@ jobs:
           name: packages-alpine
           path: out
           if-no-files-found: error
-
-  # ============================================================ stage B alpine
