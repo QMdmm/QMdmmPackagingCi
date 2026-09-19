@@ -12,6 +12,12 @@ container:
 | **B runtime** | In a *clean* container of the same distribution, does installing only the runtime package give a program that runs? |
 | **C dev** | In another clean container, is the dev package enough to build QMdmm's own GUI and Bot from source? |
 
+Stage A is one job per way of packaging: cpack handles Debian and Fedora and
+makepkg handles Arch inside one shared job, while Alpine has a job of its own for
+abuild. Stages B and C are matrix rows covering all four lines. The questions are
+therefore asked once per distribution, and a difference between distributions
+lives in the branch of a step rather than in a copy of it.
+
 ## Why the stages do not share a container
 
 Stage A has a full toolchain, Qt's development packages and the compiled source
@@ -26,8 +32,14 @@ local repository is the only way the declared inter-component dependencies
 (`qmdmm-6-dev` → `qmdmm-6` + `qmdmm-common-dev`, and the `-devel` equivalents)
 actually get resolved rather than sidestepped.
 
+On Arch there are no inter-component dependencies to resolve — one package, no
+components — and the repository is kept anyway: installing from it *by name* is
+still what shows the package is findable and its declared Qt dependencies
+resolvable.
+
 Every job begins by bringing its own image up to date (`apt-get update` +
-`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora). An image is a
+`apt-get dist-upgrade` on Debian, `dnf upgrade` on Fedora, `pacman -Syu` on
+Arch, `apk update` + `apk upgrade --available` on Alpine). An image is a
 snapshot, and installing onto a stale one would blend two different things
 together: what the package under test declares, and whatever the base image was
 simply missing. Refreshing first is what makes everything that lands afterwards
@@ -37,23 +49,46 @@ attributable to the packages being tested.
 
 The dev packages follow each distribution's own convention:
 
-| component | Debian | Fedora |
-|---|---|---|
-| `6` (runtime) | `qmdmm-6` | `qmdmm-6` |
-| `dev6` (dev) | `qmdmm-6-dev` | `qmdmm-6-devel` |
-| `dev-common` (headers) | `qmdmm-common-dev` | `qmdmm-common-devel` |
-| `doc` | `qmdmm-doc` | `qmdmm-doc` |
+| component | Debian | Fedora | Arch | Alpine |
+|---|---|---|---|---|
+| `6` (runtime) | `qmdmm-6` | `qmdmm-6` | `qmdmm-6` | `qmdmm` |
+| `dev6` (dev) | `qmdmm-6-dev` | `qmdmm-6-devel` | the same package | `qmdmm-dev` |
+| `dev-common` (headers) | `qmdmm-common-dev` | `qmdmm-common-devel` | the same package | (none) |
+| `doc` | `qmdmm-doc` | `qmdmm-doc` | not produced | `qmdmm-doc` |
+
+Two of the four lines collapse the component split, for different reasons and to
+different degrees. Arch has no mechanism for splitting a package into components
+at all, and its line does not go through CPack in the first place: one package
+answers both questions — stages B and C install the same file — so its recipe's
+`depends` is the union of what the other lines' runtime and dev packages declare,
+with no second package to carry the other half. That includes `qt6-tools` and
+`cmake`, without which the headers and the CMake package riding along in the
+runtime package could not be used. Alpine does split, through abuild's
+`split_dev`: the headers, the dev `.so` symlinks and the CMake package config all
+land in `qmdmm-dev`, so what the deb and rpm lines divide between `dev6` and
+`dev-common` is one package there. Alpine's names carry no Qt generation either,
+because Alpine splits by suffix convention rather than by an explicit package name.
 
 The workflow does not hardcode these: stage A reads the real names back out of
 the produced packages and writes `MANIFEST.tsv`, and stages B and C select on the
-suffix recorded in the matrix. The suffixes in the matrix are therefore also an
-assertion — if a package ends up named something else, stage A fails.
+suffix recorded in the matrix. What a line must produce is recorded in the matrix
+too (the `expect` field), which makes the shape an assertion as well — a package
+ending up named something else, or an Arch run producing more than one, fails
+stage A. Alpine is the exception on the packaging side: `qmdmm` is a prefix of
+every other name there, so a suffix match would prove nothing and its own pack job
+asserts the three exact names instead. Its rows in stages B and C still select
+through the matrix, with a "suffix" that happens to be the whole name (`qmdmm`)
+because the runtime package carries no Qt generation.
 
 ## Acceptance criteria
 
-**Stage B** — after bringing the base up to date, installing only the runtime
-package and running the repair command (`apt-get -f install` on Debian, an idempotent `dnf install` plus a
-`dnf check --dependencies` audit on Fedora):
+**Stage B** — after bringing the base up to date and installing only the runtime
+package, settling the dependency set as far as that distribution's package manager
+allows (`apt-get -f install` on Debian; a second, idempotent `dnf install` plus a
+`dnf check --dependencies` audit on Fedora; `pacman -Dk`, a database audit, on
+Arch, where a transaction is resolved whole and there is no half-installed state
+to repair; and on Alpine the summary reports what the install added, because apk
+resolves the whole transaction or fails):
 
 * `ldd` reports **zero** unresolved libraries for every installed QMdmm binary
   and shared library.
@@ -77,7 +112,8 @@ package and running the repair command (`apt-get -f install` on Debian, an idemp
   the packaged stack.
 
 **Stage C** — after bringing the base up to date, installing only the dev package
-by name and running the same repair pass:
+by name — on Arch that is the same package stage B installed — and settling the
+dependency set the same way:
 
 * `find_package(QMdmm6 0.0.1 REQUIRED COMPONENTS Core Networking)` succeeds.
 * QMdmm's own `QMdmmGui`, `QMdmmBot` and `QMdmmServer` directories build through
@@ -96,10 +132,19 @@ listens on `QHostAddress::Any`, which Qt maps to the dual-stack IPv6 wildcard, s
 its socket shows up in `tcp6`. If a container ever hides those files the harness
 warns and falls back to liveness rather than failing a sound package.
 
+One criterion differs by distribution. `timeout` is GNU coreutils' on Debian and
+Fedora and busybox's on Alpine, and busybox reports **143** (128 + SIGTERM) for a
+child it had to kill where coreutils reports **124**. The Alpine stages therefore
+accept `{0,124,143}` for anything they expect to survive, and filter the stderr of
+every program they start for the loader's and the kernel's own words for a failure
+(`error while loading`, `version ... not found`, `Segmentation`, `Aborted`)
+instead.
+
 The "minimal" half of "minimal but complete" is reported rather than enforced:
 the job summary records what the repair pass had to add, and what installing only
-the dev package dragged in. Declaring the dependencies correctly is what makes
-that list empty.
+the dev package dragged in — on Alpine the difference the install made to the
+package set, since there is no repair pass there. Declaring the dependencies
+correctly is what makes that list empty.
 
 ## `consumer/`
 
@@ -124,6 +169,56 @@ downstream projects have to do: `QMdmmGui/src/mainwindow.cpp` hardcodes
 `qrc:/qt/qml/QMdmm/Gui/qml/main.qml`, and where a QML module's resources end up
 is decided by the QTP0001 policy, which that call sets. Without it the rebuilt
 GUI links, starts, and then shows an empty window.
+
+## The Arch line
+
+Arch answers the same three questions through the same three stages, with its own
+package manager and its own recipe (`packaging/arch/PKGBUILD`, the file the local
+run was verified with). Three things differ, all of them deliberately:
+
+* **It packages with `makepkg`, not CPack.** The pack stage checks this repository
+  out, builds the source tarball from the QMdmm ref with `git archive` — the
+  recipe takes a local tarball, not a codeload download — and refreshes the
+  recipe's `sha256sums` with `updpkgsums`, because the committed checksums pin the
+  one ref that was verified locally while a run packages whatever ref it was
+  given.
+* **`makepkg` refuses to run as root**, and every step of a container job runs as
+  root, so the pack stage creates an ordinary `builder` user and builds as it.
+  Installing in stages B and C goes back to root: installing is not building.
+* **Nothing is signed.** No signature is produced and none is required, so the
+  local repository that stages B and C install from carries
+  `SigLevel = Optional TrustAll`. That decision is confined to that one
+  repository and never touches the system's own.
+
+The pack stage is pack-only here exactly as it is on the other lines: tests
+are not run in it, on any of the three.
+
+## The Alpine line
+
+Alpine differs from the other three in two ways, one structural and one
+load-bearing: its pack stage is a job of its own (`pack-alpine`), and the
+repository stages B and C install from is signed.
+
+
+Signing is not optional on Alpine: abuild calls `abuild-sign` for the packages and
+for the repository index unconditionally and dies without a key. This repository
+holds one half of a key pair and the repository settings hold the other.
+
+* `packaging/alpine/neve-6aaaace6.rsa.pub` — the public half, copied into the
+  consuming container's `/etc/apk/keys/` by stages B and C.
+* the `PACKAGER_PRIVKEY` secret — the private half, written to
+  `~builder/.abuild/neve-6aaaace6.rsa` in stage A, and nowhere else.
+
+The two file names have to agree: abuild derives each signature's file name from
+the private key's own file name and apk resolves that name in `/etc/apk/keys`, so
+a signature made with a differently named key is untrusted by construction. Stage
+A asserts the two halves are the same pair before it builds anything, which turns
+a mismatch into one clear message rather than an `UNTRUSTED signature` two stages
+later.
+
+The key is long-lived on purpose. The line could generate a throwaway key per run,
+as the local verification did, but then the public half committed here would mean
+nothing and no one could ever check a published package against it.
 
 ## Running it
 
@@ -154,9 +249,9 @@ Inputs (dispatched runs only):
   the packaging work (`packaging-consumer-support`) was merged into.
 * `build_type` — CMake build type, default `Release`.
 
-Images: `debian:sid` and `fedora:latest` (the rolling pointers). Pinning per
-release and adding `fedora:rawhide` as a non-blocking weekly run is left for a
-later pass, once the manual flow is stable.
+Images: `debian:sid`, `fedora:latest`, `archlinux:base` and `alpine:latest`
+(the rolling pointers). Pinning per release and adding `fedora:rawhide` as a
+non-blocking weekly run is left for a later pass, once the manual flow is stable.
 
 ## Qt version matrix
 
