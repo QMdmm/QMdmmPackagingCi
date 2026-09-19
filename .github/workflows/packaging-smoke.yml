@@ -1107,10 +1107,19 @@ jobs:
           # repository signed by anything else is untrusted by construction.
           expected=".SIGN.RSA.$PACKAGER_KEY.rsa.pub"
           for f in out/*/*.apk out/*/APKINDEX.tar.gz; do
-            members=$(tar tzf "$f")
-            echo "### members of $(basename "$f")"
-            echo "$members" | sed -n 's/^/  /'
-            if ! echo "$members" | grep -qxF "$expected"; then
+            # The listing goes to a file, and only the signature members are
+            # printed: the documentation package has thousands of members, and a
+            # listing that big does not fit in a pipe buffer.
+            tar tzf "$f" > /tmp/members.txt
+            echo "### $(basename "$f"): $(wc -l < /tmp/members.txt) members, signature members:"
+            grep '^\.SIGN\.' /tmp/members.txt | sed -n 's/^/  /' || true
+            # Read from the file rather than piping the listing into `grep -q`:
+            # `grep -q` exits on its first match, which leaves the writer holding
+            # a pipe with nobody reading it - SIGPIPE, and `set -o pipefail` turns
+            # that into a failed step for a package that is signed perfectly well.
+            # It only shows up on the packages whose listing exceeds the pipe
+            # buffer, which is why it would look like a signature problem.
+            if ! grep -qxF "$expected" /tmp/members.txt; then
               echo "::error::$(basename "$f") does not carry $expected"
               exit 1
             fi
