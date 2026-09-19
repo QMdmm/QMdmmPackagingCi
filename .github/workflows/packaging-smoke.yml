@@ -981,21 +981,28 @@ jobs:
             echo "::error::the PACKAGER_PRIVKEY secret is not set, and abuild cannot sign a package without a key"
             exit 1
           fi
-          key="/home/builder/.abuild/$PACKAGER_KEY.rsa"
+          priv="/home/builder/.abuild/$PACKAGER_KEY.rsa"
+          pub="packaging/alpine/$PACKAGER_KEY.rsa.pub"
           install -d -m 700 -o builder -g abuild /home/builder/.abuild
-          printf '%s\n' "$PRIVKEY" > "$key"
-          chown builder:abuild "$key"
-          chmod 600 "$key"
-          # The public half is committed next to the APKBUILD and is what the
-          # consuming containers copy into /etc/apk/keys. abuild names each
-          # signature after the private key's own file name, and apk resolves that
-          # name in /etc/apk/keys, so the halves have to be a pair and the file
-          # names have to agree - a mismatch would otherwise surface two stages
-          # later as a bare "UNTRUSTED signature". Assert both up front, while the
-          # message can still say what is wrong.
-          openssl pkey -in "$key" -pubout -outform DER \
-            | cmp - <(openssl pkey -pubin -in "packaging/alpine/$PACKAGER_KEY.rsa.pub" -outform DER)
-          echo "the secret and packaging/alpine/$PACKAGER_KEY.rsa.pub are the same pair"
+          printf '%s\n' "$PRIVKEY" > "$priv"
+          chown builder:abuild "$priv"
+          chmod 600 "$priv"
+          # abuild-sign is handed the private key and takes two things from the
+          # public half: it has to be next to it as <private>.pub, and the
+          # signature member it writes is named after that file (".SIGN.RSA.
+          # <name>"). apk resolves the same name in /etc/apk/keys, so the halves
+          # have to be a pair *and* the two file names have to agree - a mismatch
+          # would otherwise only surface two stages later as a bare "UNTRUSTED
+          # signature". Assert both here, and put the committed public half where
+          # abuild-sign looks for it.
+          openssl pkey -in "$priv" -pubout -outform DER \
+            | cmp - <(openssl pkey -pubin -in "$pub" -outform DER)
+          install -m 644 -o builder -g abuild "$pub" "$priv.pub"
+          # And ask abuild itself. This is the very first thing `abuild -r` does
+          # ("check early if we have abuild key"), so finding out here costs
+          # seconds instead of the whole build.
+          su builder -c "HOME=/home/builder PACKAGER_PRIVKEY=$priv abuild-sign --installed"
+          echo "the secret and $pub are the same pair, and abuild-sign can use them"
 
       - name: Prepare the recipe and the source tarball
         run: |
