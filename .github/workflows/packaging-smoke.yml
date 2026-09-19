@@ -982,9 +982,9 @@ jobs:
             exit 1
           fi
           key="/home/builder/.abuild/$PACKAGER_KEY.rsa"
-          install -d -m 700 -o builder -g builder /home/builder/.abuild
+          install -d -m 700 -o builder -g abuild /home/builder/.abuild
           printf '%s\n' "$PRIVKEY" > "$key"
-          chown builder:builder "$key"
+          chown builder:abuild "$key"
           chmod 600 "$key"
           # The public half is committed next to the APKBUILD and is what the
           # consuming containers copy into /etc/apk/keys. abuild names each
@@ -1000,8 +1000,8 @@ jobs:
       - name: Prepare the recipe and the source tarball
         run: |
           set -euxo pipefail
-          install -d -m 755 -o builder -g builder /home/builder/qmdmm
-          install -m 644 -o builder -g builder packaging/alpine/APKBUILD /home/builder/qmdmm/APKBUILD
+          install -d -m 755 -o builder -g abuild /home/builder/qmdmm
+          install -m 644 -o builder -g abuild packaging/alpine/APKBUILD /home/builder/qmdmm/APKBUILD
           # A git tree rather than a codeload download: `git archive` is what
           # produces the layout abuild looks for, and the prefix has to be
           # $pkgname-$pkgver or abuild will not find the directory it expects to
@@ -1016,15 +1016,15 @@ jobs:
           git -C /home/builder/source archive --format=tar.gz \
             --prefix="qmdmm-$pkgver/" \
             -o "/home/builder/qmdmm/qmdmm-$pkgver.tar.gz" FETCH_HEAD
-          chown -R builder:builder /home/builder/qmdmm
+          chown -R builder:abuild /home/builder/qmdmm
           ls -l /home/builder/qmdmm
 
       - name: Re-derive the source pin, then build and sign the packages
         run: |
           set -euxo pipefail
-          before=$(grep -A1 '^sha512sums=' /home/builder/qmdmm/APKBUILD | tail -1)
+          before=$(sed -n '/^sha512sums=/{n;p;}' /home/builder/qmdmm/APKBUILD)
           su builder -c "cd /home/builder/qmdmm && HOME=/home/builder abuild checksum"
-          after=$(grep -A1 '^sha512sums=' /home/builder/qmdmm/APKBUILD | tail -1)
+          after=$(sed -n '/^sha512sums=/{n;p;}' /home/builder/qmdmm/APKBUILD)
           {
             echo '### The source pin'
             echo
