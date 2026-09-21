@@ -278,12 +278,16 @@ ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for
 6.11.
 
 ```
-gh workflow run qt-version-matrix.yml -f qmdmm_ref=<branch|tag|commit>
+gh workflow run qt-version-matrix.yml -f qmdmm_ref=<branch|tag|full-sha>
 ```
 
-The `qmdmm_ref` input defaults to `main`, as in the packaging workflow, but it
-does not take the same forms: it is handed to `actions/checkout`, which resolves
-an abbreviated SHA on its own, so `<branch|tag|commit>` above is honest here and
-a short SHA works where the packaging workflow's would not. The Qt version
-installed for a run is printed in the job log, so a run records which patch
-release each line currently resolves to.
+The `qmdmm_ref` input defaults to `main`, as in the packaging workflow, and
+takes the same forms: a branch name, a tag name or a full 40-character commit
+SHA. `actions/checkout` classifies the value as a commit only when it is 40 or 64
+hex characters, and otherwise treats it as a ref glob (`+refs/heads/<ref>*`), so
+an abbreviated SHA fails here too. Only the failure differs: the action retries
+the fetch three times with a backoff and reports it as a failed `git` invocation,
+where the packaging workflow's own `git fetch` stops at the first attempt and
+says which ref it could not find. The Qt version installed for a run is printed
+in the job log, so a run records which patch release each line currently
+resolves to.

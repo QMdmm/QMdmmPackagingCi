@@ -26,7 +26,13 @@ on:
   workflow_dispatch:
     inputs:
       qmdmm_ref:
-        description: 'QMdmm ref (branch, tag or commit) to build and test'
+        # The same caveat as packaging-smoke.yml's qmdmm_ref, for a different
+        # reason: checkout classifies the value as a commit only when it is 40
+        # or 64 hex characters, and treats anything else as a ref glob
+        # (`+refs/heads/<ref>*`). A short SHA is therefore no more usable here
+        # than there - it fails as a failed `git fetch`, retried three times,
+        # rather than as a rejected input.
+        description: 'QMdmm ref (branch, tag, or full 40-character commit SHA) to build and test'
         required: true
         default: 'main'
         type: string
