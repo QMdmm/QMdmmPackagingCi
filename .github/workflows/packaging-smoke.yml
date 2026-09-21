@@ -55,7 +55,13 @@ on:
   workflow_dispatch:
     inputs:
       qmdmm_ref:
-        description: 'QMdmm ref (branch, tag or commit) to package and verify'
+        # This value is handed straight to `git fetch --depth 1 origin '<ref>'`
+        # in every job that fetches the source, and fetch resolves a ref name or
+        # a full object name and nothing else. An abbreviated SHA is neither, so
+        # a short SHA fails at that job's checkout - an error that reads as a
+        # checkout problem rather than as the input it is. Branch and tag names
+        # are fine; a commit has to be written out in full.
+        description: 'QMdmm ref (branch, tag, or full 40-character commit SHA) to package and verify'
         required: true
         default: 'main'
         type: string

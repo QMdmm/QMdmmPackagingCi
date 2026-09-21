@@ -239,14 +239,19 @@ two are `env` entries rather than `inputs` read directly at the point of use.
 Manually:
 
 ```
-gh workflow run packaging-smoke.yml -f qmdmm_ref=<branch|tag|commit>
+gh workflow run packaging-smoke.yml -f qmdmm_ref=<branch|tag|full-sha>
 gh run watch
 ```
 
 Inputs (dispatched runs only):
 
-* `qmdmm_ref` — the QMdmm ref to package and verify. Defaults to `main`, which
-  the packaging work (`packaging-consumer-support`) was merged into.
+* `qmdmm_ref` — the QMdmm ref to package and verify, given as a branch name, a
+  tag name or a full 40-character commit SHA. The value goes straight into
+  `git fetch --depth 1 origin '<ref>'`, which resolves ref names and complete
+  object names and nothing else, so an abbreviated SHA is rejected at checkout
+  in every job that fetches the source — an error that reads as a checkout
+  failure rather than as the input it is. Defaults to `main`, which the
+  packaging work (`packaging-consumer-support`) was merged into.
 * `build_type` — CMake build type, default `Release`.
 
 Images: `debian:sid`, `fedora:latest`, `archlinux:base` and `alpine:latest`
@@ -276,6 +281,9 @@ ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for
 gh workflow run qt-version-matrix.yml -f qmdmm_ref=<branch|tag|commit>
 ```
 
-The `qmdmm_ref` input defaults to `main`, as in the packaging workflow. The Qt
-version installed for a run is printed in the job log, so a run records which
-patch release each line currently resolves to.
+The `qmdmm_ref` input defaults to `main`, as in the packaging workflow, but it
+does not take the same forms: it is handed to `actions/checkout`, which resolves
+an abbreviated SHA on its own, so `<branch|tag|commit>` above is honest here and
+a short SHA works where the packaging workflow's would not. The Qt version
+installed for a run is printed in the job log, so a run records which patch
+release each line currently resolves to.
