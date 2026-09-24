@@ -6,12 +6,13 @@ name: Packaging smoke
 #
 #   A  pack     build QMdmm with a full toolchain inside the distribution's own
 #               container and produce packages there. Debian and Fedora go
-#               through cpack and Arch through makepkg, all three inside this
-#               job's matrix; Alpine's pack stage is a job of its own, because
-#               packaging there is abuild reading packaging/alpine/APKBUILD and
-#               its repository is signed. Arch's line produces a single package,
-#               which is both the runtime and the dev package, and it is not
-#               signed.
+#               through cpack and Arch through makepkg; Alpine goes through
+#               abuild reading packaging/alpine/APKBUILD, and its repository is
+#               signed. All four lines are rows of this job's matrix, so what
+#               only one line needs - a shell, a secret - is a conditional step
+#               or an expression rather than a job of its own. Arch's line
+#               produces a single package, which is both the runtime and the dev
+#               package, and it is not signed.
 #   B  runtime  a *clean* container of the same distribution installs only the
 #               runtime package, repairs the dependency set, then proves the
 #               programs load and run.
@@ -28,14 +29,15 @@ name: Packaging smoke
 # development packages still installed, a missing runtime dependency would be
 # masked by them and "minimal but complete" could not be verified at all.
 #
-# All four lines share stages B and C through one matrix: the same questions, put
-# to each distribution in its own vocabulary (apt / dnf / pacman / apk). Stages B
-# and C carry each line's own difference as a branch of its own, plus the steps
-# only that line needs: Alpine installs bash before anything else can run and puts
-# the packager key in the trust store, and Arch's build type has to reach the
-# recipe it packages from. Alpine's repository is *signed*, which is why it has a
-# pack job to itself - apk, unlike apt and dnf, will not install from a repository
-# it cannot verify, and abuild offers no way to stop signing.
+# All four lines share all three stages through one matrix: the same questions,
+# put to each distribution in its own vocabulary (apt / dnf / pacman / apk).
+# Stages B and C carry each line's own difference as a branch of its own, plus
+# the steps only that line needs: Alpine installs bash before anything else can
+# run and puts the packager key in the trust store, and Arch's build type has to
+# reach the recipe it packages from. Alpine's repository is *signed*, which is
+# why this workflow holds a packager key at all - apk, unlike apt and dnf, will
+# not install from a repository it cannot verify, and abuild offers no way to
+# stop signing.
 #
 # It runs on a schedule as well as on demand: every day the suite re-verifies
 # whatever `main` has become, so a packaging regression is caught within a day
@@ -73,9 +75,9 @@ name: Packaging smoke
 # same two lines of plumbing as stage A's, with different arguments.
 #
 # What stays in this file is what only a workflow can do: the matrix, the `uses:`
-# steps, the `if:` that picks a line's row, and the two `Install bash` steps -
-# they run under `sh`, before bash exists on Alpine, which is the one thing a
-# `#!/usr/bin/env bash` script cannot do.
+# steps, the `if:` that picks a line's row, and the three `Install bash` steps -
+# one per stage, since they run under `sh`, before bash exists on Alpine, which
+# is the one thing a `#!/usr/bin/env bash` script cannot do.
 
 on:
   workflow_dispatch:
@@ -175,9 +177,13 @@ jobs:
           # package and no doc component, because doxygen is deliberately not one
           # of its recipe's make dependencies.
           #
-          # Alpine is not a row in this job's matrix: its pack stage is the
-          # separate `pack-alpine` job below, which asserts its own three exact
-          # names.
+          # Alpine is the one row without an `expect`, because a suffix match
+          # cannot say what its names have to be: the runtime package there is
+          # plain `qmdmm`, a prefix of every other name, so that line's script
+          # keeps the assertion on its own three exact names. It is also the one
+          # row `QMDMM_BUILD_TYPE` does not reach - the recipe pins
+          # CMAKE_BUILD_TYPE=Release itself - while stage C's consumer build
+          # reads the input as it does on every line.
           - name: debian
             image: 'debian:sid'
             kind: deb
@@ -196,7 +202,21 @@ jobs:
             expect: '-6'
             sfx_runtime: '-6'
             sfx_dev: '-6'
+          - name: alpine
+            image: 'alpine:latest'
+            kind: apk
+            sfx_runtime: 'qmdmm'
+            sfx_dev: '-dev'
     steps:
+      # The Alpine image ships busybox ash alone, and this file declares bash as
+      # its shell, so bash has to arrive before anything else can run - and this
+      # one step has to ask for `sh`, which does exist there. Every other line
+      # starts with bash already installed.
+      - name: Install bash
+        if: matrix.dist.kind == 'apk'
+        shell: sh
+        run: apk add --no-cache bash
+
       # Unconditional on all four lines, and before the stage script rather than
       # in the middle of it: the Arch line's recipe and the Alpine line's
       # packager key are files in this repository, and the cpack lines read
@@ -207,11 +227,15 @@ jobs:
 
       # The whole stage, in ci/pack-<kind>.sh: refresh the base image and install
       # the toolchain and Qt 6, fetch QMdmm at the requested ref, configure,
-      # build, pack and collect. `expect` is the one thing the script cannot know
-      # by itself, so the matrix passes it in.
+      # build, pack and collect. Two things a script cannot know by itself are
+      # passed in: `expect` is what the cpack lines assert the produced package
+      # names end in, and the private half of the packager key is what abuild
+      # signs with - narrowed to the Alpine row, so no other line is handed a
+      # secret it has no use for.
       - name: Pack
         env:
           DIST_EXPECT: ${{ matrix.dist.expect }}
+          PRIVKEY: ${{ matrix.dist.kind == 'apk' && secrets.PACKAGER_PRIVKEY || '' }}
         run: ci/pack-${{ matrix.dist.kind }}.sh
 
       - name: Upload packages
@@ -221,65 +245,15 @@ jobs:
           path: out
           if-no-files-found: error
 
-  # =============================================================== stage A alpine
-  # Stage A of the Alpine line is a job of its own: it shares no step with the
-  # cpack job above. There is no cpack here - the package comes out of abuild and
-  # packaging/alpine/APKBUILD - and the names carry no Qt-generation suffix
-  # (qmdmm / qmdmm-dev / qmdmm-doc), which makes the runtime package a prefix of
-  # every other name and its exact names the only useful thing to assert on. The
-  # local repository is a *signed* APKINDEX as well, which is why this workflow
-  # holds a packager key at all.
-  #
-  # Stages B and C are the matrix rows above, with the alpine branch of each
-  # step: installing from a signed repository, reporting an install's delta
-  # rather than a repair pass, and judging "still running" by busybox's timeout.
-  #
-  # The `build_type` input does not reach this stage: the recipe pins
-  # CMAKE_BUILD_TYPE=Release itself. It still reaches stage C's consumer build,
-  # as on the other lines.
-  pack-alpine:
-    name: "A pack (alpine)"
-    runs-on: ubuntu-latest
-    container:
-      image: alpine:latest
-    steps:
-      - name: Install bash
-        # The image ships busybox ash alone, and this file declares bash as its
-        # shell, so bash has to arrive before anything else can run. This one step
-        # therefore asks for sh explicitly.
-        shell: sh
-        run: apk add --no-cache bash
-
-      # Same as the cpack job: the packager key's public half is a file in this
-      # repository.
-      - name: Checkout this harness
-        uses: actions/checkout@v7
-
-      # The whole stage, in ci/pack-apk.sh. The private half of the packager key
-      # is the one thing this stage needs and no other stage does, so it is the
-      # one place a secret is handed over - as an environment variable, which is
-      # the only way a secret can reach a script at all.
-      - name: Pack
-        env:
-          PRIVKEY: ${{ secrets.PACKAGER_PRIVKEY }}
-        run: ci/pack-apk.sh
-
-      - name: Upload packages
-        uses: actions/upload-artifact@v7
-        with:
-          name: packages-alpine
-          path: out
-          if-no-files-found: error
-
   # ================================================================= stage B
   verify-runtime:
     name: "B runtime (${{ matrix.dist.name }})"
-    # Both pack jobs, because the matrix carries every line. GitHub cannot
-    # express "this row depends on this pack job", so the job is allowed to run
-    # regardless and a row whose own pack job failed fails on its missing
-    # artifact instead - which keeps one line's packaging failure from silently
-    # suppressing the other lines' stages.
-    needs: [pack, pack-alpine]
+    # One pack job now, whose matrix carries every line. GitHub still cannot
+    # express "this row depends on that row of that matrix", so the job is
+    # allowed to run regardless and a row whose own pack row failed fails on its
+    # missing artifact instead - which keeps one line's packaging failure from
+    # silently suppressing the other lines' stages.
+    needs: pack
     if: always() && !cancelled()
     runs-on: ubuntu-latest
     container:
@@ -312,10 +286,10 @@ jobs:
           - name: alpine
             image: 'alpine:latest'
             kind: apk
-            # No `expect`: this row's pack stage is the separate `pack-alpine`
-            # job, which asserts its own three exact names. No dev-common either:
-            # abuild's split_dev puts the headers and the CMake package config
-            # into -dev itself, so there is no third package.
+            # No `expect`: this line's stage A row asserts its own three exact
+            # names instead. No dev-common either: abuild's split_dev puts the
+            # headers and the CMake package config into -dev itself, so there is
+            # no third package.
             sfx_runtime: 'qmdmm'
             sfx_dev: '-dev'
     steps:
@@ -358,7 +332,7 @@ jobs:
   # ================================================================= stage C
   verify-dev:
     name: "C dev (${{ matrix.dist.name }})"
-    needs: [pack, pack-alpine]
+    needs: pack
     if: always() && !cancelled()
     runs-on: ubuntu-latest
     container:
@@ -391,10 +365,10 @@ jobs:
           - name: alpine
             image: 'alpine:latest'
             kind: apk
-            # No `expect`: this row's pack stage is the separate `pack-alpine`
-            # job, which asserts its own three exact names. No dev-common either:
-            # abuild's split_dev puts the headers and the CMake package config
-            # into -dev itself, so there is no third package.
+            # No `expect`: this line's stage A row asserts its own three exact
+            # names instead. No dev-common either: abuild's split_dev puts the
+            # headers and the CMake package config into -dev itself, so there is
+            # no third package.
             sfx_runtime: 'qmdmm'
             sfx_dev: '-dev'
     steps:

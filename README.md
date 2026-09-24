@@ -12,10 +12,11 @@ container:
 | **B runtime** | In a *clean* container of the same distribution, does installing only the runtime package give a program that runs? |
 | **C dev** | In another clean container, is the dev package enough to build QMdmm's own GUI and Bot from source? |
 
-Stage A is one job per way of packaging: cpack handles Debian and Fedora and
-makepkg handles Arch inside one shared job, while Alpine has a job of its own for
-abuild. Stages B and C are matrix rows covering all four lines. The questions are
-therefore asked once per distribution.
+Each of the three stages is one job with a matrix over the four distributions:
+Debian and Fedora pack through cpack, Arch through makepkg, and Alpine through
+abuild reading `packaging/alpine/APKBUILD`. What only one line needs is a
+conditional step or an expression inside that shared job rather than a job of
+its own. The questions are therefore asked once per distribution.
 
 The shell lives in `ci/`, one entry script per distribution per stage, and each
 one owns a whole stage rather than a step: `ci/pack-<kind>.sh`,
@@ -37,8 +38,9 @@ wording.
 
 Every job checks this repository out and downloads its artifacts *before* its
 stage script runs, so a script never has to be split around a `uses:` step. The
-two `Install bash` steps stay in the workflow: they run under `sh`, before bash
-exists on Alpine, which is the one thing a `#!/usr/bin/env bash` script cannot do.
+three `Install bash` steps stay in the workflow — one per stage — because they
+run under `sh`, before bash exists on Alpine, which is the one thing a
+`#!/usr/bin/env bash` script cannot do.
 
 ## Why the stages do not share a container
 
@@ -217,9 +219,10 @@ are not run in it, on any of the three.
 
 ## The Alpine line
 
-Alpine differs from the other three in two ways, one structural and one
-load-bearing: its pack stage is a job of its own (`pack-alpine`), and the
-repository stages B and C install from is signed.
+Alpine differs from the other three in two things its scripts cannot get around:
+it packs with abuild, which signs the packages and the repository index whether or
+not anyone asked it to, and the image has no bash, so the workflow installs one
+before any stage script can run.
 
 
 Signing is not optional on Alpine: abuild calls `abuild-sign` for the packages and
@@ -229,7 +232,9 @@ holds one half of a key pair and the repository settings hold the other.
 * `packaging/alpine/neve-6aaaace6.rsa.pub` — the public half, copied into the
   consuming container's `/etc/apk/keys/` by stages B and C.
 * the `PACKAGER_PRIVKEY` secret — the private half, written to
-  `~builder/.abuild/neve-6aaaace6.rsa` in stage A, and nowhere else.
+  `~builder/.abuild/neve-6aaaace6.rsa` in stage A, and nowhere else. Stage A
+  hands it over on that line's row only: the environment variable carrying it is
+  an expression on the matrix row, so the other three lines get an empty value.
 
 The two file names have to agree: abuild derives each signature's file name from
 the private key's own file name and apk resolves that name in `/etc/apk/keys`, so
