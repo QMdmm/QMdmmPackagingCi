@@ -15,8 +15,30 @@ container:
 Stage A is one job per way of packaging: cpack handles Debian and Fedora and
 makepkg handles Arch inside one shared job, while Alpine has a job of its own for
 abuild. Stages B and C are matrix rows covering all four lines. The questions are
-therefore asked once per distribution, and a difference between distributions
-lives in the branch of a step rather than in a copy of it.
+therefore asked once per distribution.
+
+The shell lives in `ci/`, one entry script per distribution per stage, and each
+one owns a whole stage rather than a step: `ci/pack-<kind>.sh`,
+`ci/runtime-<kind>.sh`, `ci/dev-<kind>.sh`. A difference between distributions is
+therefore a file rather than a branch inside a step, which is what lets a stage be
+reused by the release packaging that produces the versioned artifacts. The package
+list a stage installs is still a decision taken at the call site: it is handed to
+`ci/base-image-<kind>.sh`, which refreshes the image and installs whatever it is
+given — so stage A's toolchain, stage B's inspection tooling and stage C's plain
+compiler are one implementation with three arguments.
+
+The two questions stages B and C ask that are *not* per distribution are one
+script per platform instead: `ci/runtime-verify-linux.sh`, and the pair
+`ci/build-verify.sh` + `ci/run-verify-linux.sh` (the rebuilt Server runs in the
+first, while port 6366 is free, and the installed one in the second, so the
+rebuilt Bot has something to talk to). Those three read `DIST_KIND` for the two
+things that really do differ per line: the timeout's exit status and the loader's
+wording.
+
+Every job checks this repository out and downloads its artifacts *before* its
+stage script runs, so a script never has to be split around a `uses:` step. The
+two `Install bash` steps stay in the workflow: they run under `sh`, before bash
+exists on Alpine, which is the one thing a `#!/usr/bin/env bash` script cannot do.
 
 ## Why the stages do not share a container
 
