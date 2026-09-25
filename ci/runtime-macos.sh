@@ -113,6 +113,14 @@ for prog in QMdmm6 QMdmmServer6 QMdmmBot6; do
   fi
 done
 
+# The load commands are read once, into a variable, because the reading belongs in
+# two places: the summary, which is read from the run's own page, and the step
+# log, which is where every other number in this file can be grepped from. A
+# reading that lived only in the summary could not be checked that way.
+build_info=$(xcrun vtool -show-build "$app/Contents/MacOS/QMdmm6" 2>&1 | grep -E 'architecture|minos|sdk' || true)
+echo '### The minimum macOS the bundle asks for, out of its own load commands'
+echo "$build_info"
+
 {
   echo '### The application as copied onto this machine'
   echo
@@ -126,7 +134,7 @@ done
   echo 'The minimum macOS the bundle asks for, read out of its own load commands:'
   echo
   echo '```'
-  xcrun vtool -show-build "$app/Contents/MacOS/QMdmm6" 2>&1 | grep -E 'architecture|minos|sdk' || true
+  echo "$build_info"
   echo '```'
   echo
   echo 'Nothing in this harness sets a deployment target, so that floor is the'

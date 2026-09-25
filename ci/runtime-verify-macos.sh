@@ -188,7 +188,11 @@ done
 # file, a hit returns 0 with a count and a miss returns 1 with a zero.
 #
 # The count is kept as the reading rather than reduced to a yes: a criterion that
-# only ever compares against zero is what hid this one.
+# only ever compares against zero is what hid this one. The count itself is not
+# comparable across architectures, though - `grep -c` counts matching *lines* of
+# the NUL-stripped file, and a 0x0A byte landing between two occurrences splits
+# them - so the same needle in the same image read 1 on the arm64 row and 2 on the
+# x86_64 row of run 36118694850. Only the `>= 1` comparison is a criterion.
 qml_occurrences() {
   # LC_ALL=C so tr treats the file as bytes: under a UTF-8 locale it stops at the
   # first byte sequence that is not valid UTF-8, which is most of a Mach-O.
