@@ -27,9 +27,9 @@ fi
 # package puts its CMake package where CMake looks, and no such line is needed.
 #
 # The list is derived rather than written out: every dependency the formula
-# pulled in contributes its prefix, which is what puts qtbase, qtdeclarative and
-# qtwebsockets - Qt's own sub-modules, reached through the `qt` meta formula - on
-# the path without naming any of them.
+# pulled in contributes its prefix, which is what puts qtbase, qtdeclarative,
+# qtwebsockets and qtsvg - the Qt sub-modules the formula names, plus the one
+# qtdeclarative brings with it - on the path without naming any of them here.
 prefix_path=$(brew --prefix qmdmm)
 for dep in $(brew deps --installed "$HOMEBREW_TAP/qmdmm"); do
   prefix_path="$prefix_path;$(brew --prefix "$dep")"

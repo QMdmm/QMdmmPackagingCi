@@ -18,11 +18,18 @@ set -euxo pipefail
 # the formula's dependency whatever the formula declared, and the half of this
 # stage that asks "are the declared dependencies complete" would be answering
 # nothing.
-if ls /opt/homebrew/opt 2>/dev/null | grep -qx qt; then
-  echo "::error::Qt is already installed on this runner, so a missing dependency could not be told from a satisfied one"
-  ls -l /opt/homebrew/opt/qt
-  exit 1
-fi
+#
+# Every name the formula depends on is asked about, not just `qt`: the formula
+# names three sub-modules, so a runner carrying qtbase would satisfy the pour
+# with the meta formula never involved - and a check keyed on `qt` alone would
+# have called that runner clean.
+for module in qt qtbase qtdeclarative qtwebsockets; do
+  if ls /opt/homebrew/opt 2>/dev/null | grep -qx "$module"; then
+    echo "::error::Qt ($module) is already installed on this runner, so a missing dependency could not be told from a satisfied one"
+    ls -l "/opt/homebrew/opt/$module"
+    exit 1
+  fi
+done
 for tool in qmake6 qtpaths6 moc; do
   if command -v "$tool" >/dev/null; then
     echo "::error::$tool is on PATH before anything was installed"
@@ -102,12 +109,22 @@ fi
 echo "poured from the bottle, not built from source"
 
 # The other half of "the declared dependencies are complete", stated as a
-# reading: the formula declares one runtime dependency, and pouring it has to be
-# what put Qt on this machine.
-if ! brew list --versions qt >/dev/null 2>&1; then
-  echo "::error::Qt is not installed after installing qmdmm, so depends_on \"qt\" did not do what it says"
+# reading: the formula declares three Qt sub-modules, and pouring it has to be
+# what put them on this machine.
+for module in qtbase qtdeclarative qtwebsockets; do
+  if ! brew list --versions "$module" >/dev/null 2>&1; then
+    echo "::error::$module is not installed after installing qmdmm, so the formula's depends_on did not put it there"
+    exit 1
+  fi
+done
+# And the meta formula must *not* be here. Depending on `qt` installs all 39 Qt
+# sub-modules, which is what this formula was changed to stop doing, and an
+# assertion that only counted the three would be green either way.
+if brew list --versions qt >/dev/null 2>&1; then
+  echo "::error::the qt meta formula came in too, so installing qmdmm still drags in every Qt sub-module"
   exit 1
 fi
+echo "the three Qt sub-modules are here and the meta formula is not"
 
 {
   echo '### The pour'
@@ -119,7 +136,8 @@ fi
   echo '### What installing only qmdmm brought in'
   echo
   echo '```'
-  brew list --versions qt
+  brew list --versions qtbase qtdeclarative qtwebsockets
+  brew list --versions qt || echo 'the qt meta formula is not installed'
   brew deps --installed --include-build "$HOMEBREW_TAP/qmdmm" || true
   echo '```'
 } >> "$GITHUB_STEP_SUMMARY"

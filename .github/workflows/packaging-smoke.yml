@@ -169,8 +169,8 @@ env:
   BOTTLE_ROOT_URL: http://127.0.0.1:8000
   # Homebrew updates its own index before an install unless told not to, which on
   # a macOS runner is minutes spent refreshing a snapshot that the pin below does
-  # not depend on: the formula under test comes from the tap, and its `qt`
-  # dependency resolves from whatever index is on the machine. The Linux lines
+  # not depend on: the formula under test comes from the tap, and its Qt
+  # dependencies resolve from whatever index is on the machine. The Linux lines
   # refresh their images for the opposite reason - there the base image *is* the
   # thing being measured against.
   HOMEBREW_NO_AUTO_UPDATE: '1'

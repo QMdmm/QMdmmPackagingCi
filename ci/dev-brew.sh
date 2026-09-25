@@ -19,11 +19,13 @@
 #     vocabulary.
 set -euxo pipefail
 
-if ls /opt/homebrew/opt 2>/dev/null | grep -qx qt; then
-  echo "::error::Qt is already installed on this runner, so what the dev face provides could not be told from what the image provided"
-  ls -l /opt/homebrew/opt/qt
-  exit 1
-fi
+for module in qt qtbase qtdeclarative qtwebsockets; do
+  if ls /opt/homebrew/opt 2>/dev/null | grep -qx "$module"; then
+    echo "::error::Qt ($module) is already installed on this runner, so what the dev face provides could not be told from what the image provided"
+    ls -l "/opt/homebrew/opt/$module"
+    exit 1
+  fi
+done
 
 brew tap "$HOMEBREW_TAP"
 brew trust --tap "$HOMEBREW_TAP"

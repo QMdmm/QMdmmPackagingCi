@@ -308,7 +308,8 @@ it is also the only line with **no stage C**.
 Four things are this line's own:
 
 * **Qt is handed to it by the workflow.** Every other line takes Qt from the
-  platform: a distribution's packages, or the formula's `depends_on "qt"`. A
+  platform: a distribution's packages, or the three Qt sub-modules the formula
+  depends on. A
   bundle cannot — it has to be built against an archive whose frameworks can be
   copied into it, and Homebrew's Qt has QML plugins that are symlinks into the
   Cellar, which dangle the moment they are copied. So the job installs the

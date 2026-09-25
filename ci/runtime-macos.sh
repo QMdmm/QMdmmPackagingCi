@@ -22,11 +22,13 @@
 # without being self-contained at all.
 set -euxo pipefail
 
-if ls /opt/homebrew/opt 2>/dev/null | grep -qx qt; then
-  echo "::error::Qt is already installed on this runner, so a self-contained bundle could not be told from one that borrowed the machine's Qt"
-  ls -l /opt/homebrew/opt/qt
-  exit 1
-fi
+for module in qt qtbase qtdeclarative qtwebsockets; do
+  if ls /opt/homebrew/opt 2>/dev/null | grep -qx "$module"; then
+    echo "::error::Qt ($module) is already installed on this runner, so a self-contained bundle could not be told from one that borrowed the machine's Qt"
+    ls -l "/opt/homebrew/opt/$module"
+    exit 1
+  fi
+done
 for tool in qmake6 qtpaths6 moc; do
   if command -v "$tool" >/dev/null; then
     echo "::error::$tool is on PATH before anything was installed"
