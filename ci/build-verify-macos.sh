@@ -18,6 +18,18 @@ if ! command -v gtimeout >/dev/null; then
   exit 1
 fi
 
+# Qt's Linguist tools, the other declared harness dependency. The consumer
+# rebuilds QMdmmGui from source, and its CMakeLists asks Qt for LinguistTools
+# (`find_package(Qt6 REQUIRED COMPONENTS Widgets LinguistTools)`, inside its
+# `if (Qt6_FOUND)` branch), so the tools have to be here. The formula keeps them
+# out of its own dependencies on purpose - running the three programs does not
+# need them - which is why this is the harness's to install, and why the failure
+# to notice it would read as "the package cannot build a consumer".
+if ! brew list --versions qttools >/dev/null 2>&1; then
+  echo "::error::qttools is not installed on this runner; the workflow installs it for this stage"
+  exit 1
+fi
+
 # The prefixes, named explicitly, and that is the line this stage diverges on.
 #
 # `find_package(QMdmm6)` and `find_package(Qt6)` both have to be answered, and

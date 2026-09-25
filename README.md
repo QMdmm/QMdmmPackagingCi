@@ -278,7 +278,13 @@ Three things are macOS's own:
   fail to find `WebSockets`, which is in `qtwebsockets`'; the one place they are
   all visible together is `$HOMEBREW_PREFIX/lib/cmake`. The rest of the list is
   derived rather than written out — every dependency the formula pulled in
-  contributes its prefix, which is what covers the keg-only ones.
+  contributes its prefix, which is what covers the keg-only ones. One thing the
+  formula deliberately does not carry along is Qt's Linguist tools: QMdmmGui's
+  CMakeLists asks Qt for `LinguistTools` unconditionally, and running the three
+  programs needs none of it, so the workflow installs `qttools` for this stage
+  instead — after stage C's own check that the runner arrived without Qt, since
+  `qttools` depends on `qtbase` and `qtdeclarative`. `build-verify-macos.sh`
+  asserts it is there, the same way it asserts `gtimeout` is.
 
 * **The criterion is "it poured", not "it installed".** A formula whose bottle
   block disagrees with the bottle that was produced — a stale checksum, the file

@@ -673,6 +673,16 @@ jobs:
       - name: Install the formula
         run: ci/dev-${{ matrix.dist.kind }}.sh
 
+      # Qt's Linguist tools, installed for this stage rather than declared by
+      # the formula. The consumer rebuilds QMdmmGui from source, and its
+      # CMakeLists asks Qt for LinguistTools, so the tools have to be on the
+      # machine; the formula keeps `qttools` build-only, because running the
+      # three programs does not need them. It goes here and not in the coreutils
+      # step above, because qttools depends on qtbase and qtdeclarative and
+      # stage C opens by asserting that the runner arrived without Qt.
+      - name: Install Qt's Linguist tools (for the consumer build)
+        run: brew install qttools
+
       # The consumer project built against what the formula installed, and the
       # executables it produces proven: ci/build-verify-macos.sh. It carries its
       # own summary, written on the way out under a trap rather than by a step
