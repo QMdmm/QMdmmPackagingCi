@@ -80,13 +80,17 @@ failed=0
 # is deliberately NOT made here - the rebuilt programs live in a build tree and
 # their own libraries are right there next to them.
 #
-# `tail -n +2` and `[[:space:]]` rather than `\t`: BSD sed does not know that
-# escape, and a pattern that never matches would make the assertion below pass
-# vacuously. The reading is taken the same way in both scripts on purpose, and so
-# is the shape that follows it: piping this into `grep -q` is safe because the
-# line is far under the pipe buffer, which runtime-verify-macos.sh measures and
-# qml_occurrences below does not get to assume.
-deps() { otool -L "$1" | tail -n +2 | sed -nE 's/^[[:space:]]*(\/[^ ]*).*/\1/p'; }
+# `[[:space:]]+` rather than `\t`: BSD sed does not know that escape, and a
+# pattern that never matches would make the assertion below pass vacuously. The
+# `+` is load-bearing, for the reason runtime-verify-macos.sh measures: the file
+# name is printed at column 0 and load commands are tab-indented, and a universal
+# binary prints one such header per architecture, so a zero-width indent would
+# read the second header as a reference to the file itself. The reading is taken
+# the same way in both scripts on purpose, and so is the shape that follows it:
+# piping this into `grep -q` is safe because the line is far under the pipe
+# buffer, which runtime-verify-macos.sh measures and qml_occurrences there does
+# not get to assume.
+deps() { otool -L "$1" | sed -nE 's/^[[:space:]]+(\/[^ ]*).*/\1/p'; }
 for exe in consumer-build/qmdmm-gui/QMdmm6 \
            consumer-build/qmdmm-bot/QMdmmBot6 \
            consumer-build/qmdmm-server/QMdmmServer6; do

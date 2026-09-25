@@ -96,21 +96,32 @@ targets=("${progs[@]}" "${libs[@]}")
   echo '```'
 } >> "$GITHUB_STEP_SUMMARY"
 
-# The dependency assertion. `otool -L` prints the file name on its own line and
-# one tab-indented entry per load command after it.
+# The dependency assertion. `otool -L` prints the file name at the start of a
+# line and one tab-indented entry per load command under it, so the indent is the
+# whole of the difference between a header and a reference, and keying on it is
+# what keeps a header out of the reading.
 #
-# The indent is deliberately not written as `\t`: this is BSD sed, which does not
-# know that escape, and a pattern that never matches would leave every assertion
-# below passing vacuously. `tail -n +2` drops the header line and `[[:space:]]`
-# matches the indent - measured against a real installed GUI, where it extracts
-# nine /opt/homebrew references.
+# The indent is written `[[:space:]]+` rather than `\t`: this is BSD sed, which
+# does not know that escape, and a pattern that never matches would leave every
+# assertion below passing vacuously. It also has to be `+` and not `*`, which is a
+# bug this face found rather than a matter of style. A *universal* binary gets one
+# header line per architecture, so dropping the first line with `tail -n +2`
+# leaves the second one behind, and a pattern that accepts a zero-width indent
+# then reads that header as a reference to the file itself. Measured on a
+# universal QtCore: the old form returned a fourteenth entry, the file's own path
+# in the tree it was built in, and the `dmg` face - whose whole job is to notice a
+# reference pointing anywhere but the bundle and the system - went red on all five
+# of its targets for it. The `brew` face never saw it, for two independent
+# reasons: its bottle carries one architecture, so there is one header and
+# `tail -n +2` does drop it, and a header that leaked anyway would point into
+# /opt/homebrew, which is what that face asserts in the first place.
 #
 # Piping this into `grep -q` is safe where the same shape is not, and the
 # difference is measured rather than assumed: the line is under the pipe buffer,
 # so nothing here blocks or writes after the reader has gone. 200 runs of the
 # pipeline below returned zero for every one. `qml_occurrences` further down is
 # the case that is not safe, and says why.
-deps() { otool -L "$1" | tail -n +2 | sed -nE 's/^[[:space:]]*(\/[^ ]*).*/\1/p'; }
+deps() { otool -L "$1" | sed -nE 's/^[[:space:]]+(\/[^ ]*).*/\1/p'; }
 for t in "${targets[@]}"; do
   echo "### otool -L $t"
   otool -L "$t" | sed -e 's/^/  /'
