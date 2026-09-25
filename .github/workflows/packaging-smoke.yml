@@ -108,6 +108,14 @@ on:
     # Scheduled runs have no inputs at all, which is what the QMDMM_REF /
     # QMDMM_BUILD_TYPE defaults below exist for.
     #
+    # The trigger is workflow-wide, so a scheduled run carries every job in this
+    # file - the macOS line included. They are rows of this same run, not a
+    # workflow of their own, no job has an `if:` keyed to the event, and the
+    # event's only effect is to leave those two defaults in force. Adding the
+    # macOS line therefore put it on the nightly run as well, deliberately: the
+    # nightly run is where a line that breaks without anyone touching it gets
+    # noticed, and there is nothing to switch on for it.
+    #
     # Runs do not start at the field's hour. Measured over four scheduled runs,
     # all with created_at == run_started_at (started late, not queued):
     #
