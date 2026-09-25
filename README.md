@@ -335,6 +335,18 @@ Four things are this line's own:
   only route an Intel machine has left. The stage asserts it rather than trusting
   it — every Mach-O in the bundle has to be `x86_64 arm64`.
 
+* **The declared floor is read, not written down.** The thing that binds a user is
+  the floor of the Qt inside the bundle, so stage A reads `minos` off the QtCore it
+  is about to link against and passes it on as `CMAKE_OSX_DEPLOYMENT_TARGET`. The
+  bundle then declares it in both places that count: the executable's load command
+  and the `LSMinimumSystemVersion` key the Finder reads before it will open a
+  bundle at all. Left unset, CMake takes the host SDK's version instead, which is
+  how this line came to declare `26.0` — a statement about the machine that built
+  it — while the Qt it carries declares `13.0`. Setting it is not only a label:
+  the compiler then links against that version's SDK surface, so new symbols
+  become weak and the bundle stops depending on API that only the building
+  machine's macOS happens to have.
+
 * **There is no stage C, and its absence is a criterion rather than a gap.**
   There is no dev package on macOS and the image carries no development content:
   `macdeployqt` copies a framework's binary and `Resources` and drops its
@@ -355,7 +367,8 @@ Three scripts, two of them this line's own:
   for both architectures, build, `cpack -G DragNDrop`, then assert the shape of
   the image on the **mounted** image: exactly three top-level entries, 18
   frameworks in the bundle, all three platform plugins with `libqoffscreen.dylib`
-  among them, the ad-hoc signature verifying, and every Mach-O universal.
+  among them, the ad-hoc signature verifying, every Mach-O universal, and the
+  floor the bundle declares matching the one read off the Qt it carries.
 * `ci/runtime-macos.sh` — stage B's first half: assert the runner has no Qt, mount
   the image, and copy `QMdmm6.app` to `/Applications`, which is what the image's
   own readme tells a user to do. That the copy is what gets run matters here: the
@@ -373,15 +386,14 @@ would answer a different question (what a translator makes of it) rather than th
 one an Intel user asks. Stage A stays a single job on purpose: one universal
 `.dmg` is built once, and both rows verify that same artifact.
 
-The Intel row is `macos-26-intel` rather than the older `macos-15-intel`, and
-that follows from the artifact instead of from a preference: nothing in this
-harness sets a deployment target, so CMake takes the host SDK's version as the
-floor, which makes the image's lowest supported macOS whatever `macos-latest`
-happened to be when it built it. On Sequoia the bundle could not load at all.
-Both rows therefore report the bundle's own `minos` in the summary, next to the
-architecture the machine actually is — `ci/runtime-macos.sh` asserts the second
-one, because a row that landed on the wrong architecture would silently run the
-other slice and duplicate its neighbour.
+The Intel row is `macos-26-intel` rather than the older `macos-15-intel`. It was
+chosen when this harness was believed to declare the building machine's macOS as
+its floor; that belief has since been measured and is wrong — on a real Intel Mac
+running 15.8, the image's own criteria all pass — so the row is not forced by the
+artifact. It is kept where it is. Both rows report the bundle's own `minos` in the
+summary, next to the architecture the machine actually is — `ci/runtime-macos.sh`
+asserts the second one, because a row that landed on the wrong architecture would
+silently run the other slice and duplicate its neighbour.
 
 ## Running it
 

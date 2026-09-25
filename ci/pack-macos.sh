@@ -14,12 +14,14 @@
 #     bundle leaves them dangling. So the workflow installs the official archive
 #     with install-qt-action and hands its root down as QT_ROOT_DIR.
 #
-#   four flags a distribution package does not need
+#   five flags a distribution package does not need
 #     CMAKE_PREFIX_PATH points at that archive; CMAKE_IGNORE_PREFIX_PATH keeps
 #     /opt/homebrew - which is where this image's cmake and ninja come from -
 #     out of the *search* path, so no package of the harness sneaks into the
 #     bundle's dependencies; CMAKE_OSX_ARCHITECTURES makes one universal product
-#     instead of an arch matrix; and the install prefix is not /usr, because a
+#     instead of an arch matrix; CMAKE_OSX_DEPLOYMENT_TARGET is read out of the
+#     archive's own QtCore instead of being left to the host SDK, which is what
+#     the bundle then declares; and the install prefix is not /usr, because a
 #     .dmg is not installed by a package manager.
 #
 #   the generator
@@ -54,12 +56,45 @@ if [ -z "${QT_ROOT_DIR:-}" ]; then
 fi
 echo "official Qt at $QT_ROOT_DIR"
 
+# The macOS version this line's product declares, read off the Qt it links
+# against rather than written down here. What actually binds a user is the floor
+# of the Qt inside the bundle, so it is QtCore's own load command that gets
+# asked; reading it and passing it on keeps the declared value equal to the real
+# one, and lets it follow Qt's next release without anyone coming back to edit a
+# number.
+#
+# It is not only a declaration. With a deployment target set, the compiler
+# links against that version's SDK surface - new symbols become weak - so the
+# bundle stops depending on whatever API the SDK of the macOS that happened to
+# build it offers. Left unset, CMake takes that host SDK version instead, which
+# is how this line came to declare 26.0 while the Qt it carries declares 13.0.
+#
+# Read from the framework's binary and not from a plist: it is the load command
+# the loader acts on. Note that no earlier step should have written that number
+# down either - if a floor is ever needed before Qt is installed, it is a sign
+# this reading has been bypassed.
+qt_core="$QT_ROOT_DIR/lib/QtCore.framework/Versions/A/QtCore"
+if [ ! -f "$qt_core" ]; then
+  echo "::error::no QtCore binary at $qt_core; the floor this line declares is read out of it"
+  exit 1
+fi
+# One value per slice. A universal Qt normally gives the same one twice; taking
+# the highest is what binds a user, since a machine must satisfy the strictest
+# slice it may run.
+qt_minos=$(vtool -show-build "$qt_core" | awk '$1 == "minos" { print $2 }' | sort -V | tail -1)
+if [ -z "$qt_minos" ]; then
+  echo "::error::could not read a minos out of $qt_core"
+  exit 1
+fi
+echo "the Qt linked against here declares macOS $qt_minos; so will the bundle"
+
 cmake -S qmdmm-src -B build -G Ninja \
   -DCMAKE_BUILD_TYPE="$QMDMM_BUILD_TYPE" \
   -DCMAKE_INSTALL_PREFIX="$PWD/inst" \
   -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" \
   -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew \
   -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
+  -DCMAKE_OSX_DEPLOYMENT_TARGET="$qt_minos" \
   -DBUILD_TESTING=OFF \
   -DQMDMM_EXPORT_PRIVATE=NO
 cmake --build build --parallel
@@ -148,6 +183,25 @@ if ! codesign --verify --deep --strict "$app"; then
   failed=1
 fi
 
+# The floor the bundle declares, in both of the places it is written: the main
+# executable's load command, and the Info.plist key the Finder reads to decide
+# whether the bundle may be opened at all. Both come from the deployment target
+# read off Qt above, and asserting both is what separates "the value was carried
+# through" from "one of the two is still the host SDK's version" - this is also
+# the reading that would notice the deployment target quietly ceasing to apply,
+# which is how a product built on macOS 26 came to declare 26.0.
+app_minos=$(vtool -show-build "$app/Contents/MacOS/QMdmm6" | awk '$1 == "minos" { print $2 }' | sort -u | paste -sd, -)
+info_minos=$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$app/Contents/Info.plist" 2>/dev/null || true)
+echo "### declared floor: load command [$app_minos] | Info.plist [$info_minos] | Qt [$qt_minos]"
+if [ "$app_minos" != "$qt_minos" ]; then
+  echo "::error::the bundle's executable declares macOS $app_minos, not the $qt_minos of the Qt it carries"
+  failed=1
+fi
+if [ "$info_minos" != "$qt_minos" ]; then
+  echo "::error::LSMinimumSystemVersion is '$info_minos', not the $qt_minos of the Qt the bundle carries"
+  failed=1
+fi
+
 # Every Mach-O in the bundle, in both architectures. One universal product is a
 # decision - it is what covers Intel machines, which have no other route left
 # now that Homebrew ships no x86_64 macOS bottles - and this is the reading that
@@ -194,4 +248,9 @@ printf 'qmdmm\t%s\t%s\n' "$version" "$(basename "$dmg")" >> out/MANIFEST.tsv
   echo 'drag it to, and a readme. It is universal - x86_64 and arm64 in one'
   echo 'product - and the image holds no development content at all, which is'
   echo 'why this line has no stage C: there is nothing to build against.'
+  echo
+  echo "It declares macOS $qt_minos as its floor, in the executable's load"
+  echo 'command and in the Info.plist key the Finder reads. That is the floor of'
+  echo 'the Qt inside it, read off that Qt - not the version of whichever macOS'
+  echo 'happened to build it.'
 } >> "$GITHUB_STEP_SUMMARY"
