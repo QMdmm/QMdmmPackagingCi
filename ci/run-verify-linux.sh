@@ -5,9 +5,9 @@
 # closes the loop stage C exists for - a source build against the dev package
 # talking to the packaged runtime - and it is the half of the checks that needs
 # port 6366, which is why it is a script of its own rather than part of
-# build-verify.sh.
+# build-verify-linux.sh.
 #
-# One script for every distribution, like build-verify.sh: what differs per kind
+# One script for every distribution, like build-verify-linux.sh: what differs per kind
 # is the loader's wording, and that follows `DIST_KIND`.
 set +e
 set -uo pipefail

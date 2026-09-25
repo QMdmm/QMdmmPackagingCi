@@ -145,6 +145,27 @@ env:
   # private key's own name and apk resolves that name in /etc/apk/keys, so the two
   # file names have to agree for a package to be installable at all.
   PACKAGER_KEY: neve-6aaaace6
+  # ---- the Homebrew face ---------------------------------------------------
+  # The tap the formula lives in, in Homebrew's own spelling: the repository is
+  # QMdmm/homebrew-qmdmm and `brew tap` drops the prefix, so this is what both
+  # `brew tap` and `brew trust` take, and what the tap's directory is named
+  # after. The formula is not in this repository on purpose - what gets
+  # verified has to be the recipe a user gets.
+  HOMEBREW_TAP: QMdmm/qmdmm
+  # Where a bottle is said to live while it is being poured. It is a convention
+  # between stage A and the stages that consume its bottle, and not a published
+  # address: stage A cannot reach the machine that will pour, so each consuming
+  # stage serves its own copy of the bottle directory on loopback and the pour
+  # below goes through a real download with a real checksum check. Publishing a
+  # bottle is the release step's business, not this workflow's.
+  BOTTLE_ROOT_URL: http://127.0.0.1:8000
+  # Homebrew updates its own index before an install unless told not to, which on
+  # a macOS runner is minutes spent refreshing a snapshot that the pin below does
+  # not depend on: the formula under test comes from the tap, and its `qt`
+  # dependency resolves from whatever index is on the machine. The Linux lines
+  # refresh their images for the opposite reason - there the base image *is* the
+  # thing being measured against.
+  HOMEBREW_NO_AUTO_UPDATE: '1'
 
 defaults:
   run:
@@ -400,14 +421,14 @@ jobs:
         run: ci/dev-${{ matrix.dist.kind }}.sh
 
       # The consumer project built against the installed package, and the
-      # executables it produces proven: ci/build-verify.sh. It carries its own
+      # executables it produces proven: ci/build-verify-linux.sh. It carries its own
       # summary, written on the way out rather than on the way through - the step
       # that used to write it did so under `if: always()`, which is what a shell
       # script expresses as a trap.
       - name: Build the consumer project
         env:
           DIST_KIND: ${{ matrix.dist.kind }}
-        run: ci/build-verify.sh
+        run: ci/build-verify-linux.sh
 
       # The rebuilt Bot against the installed Server, which is the half that
       # needs port 6366: ci/run-verify-linux.sh.
@@ -415,3 +436,143 @@ jobs:
         env:
           DIST_KIND: ${{ matrix.dist.kind }}
         run: ci/run-verify-linux.sh
+
+  # ================================================== the Homebrew face
+  #
+  # Same three questions, same three stages, a second platform - and a job group
+  # of its own rather than rows of the three above, because a macOS runner cannot
+  # run a Linux container. `runs-on` and `container:` are job-level keys, so a row
+  # cannot differ from its neighbours in either, and there is no arranging this
+  # as one matrix.
+  #
+  # What is *not* different is the shape: one row per packaging method, one job
+  # per stage, the shell in ci/, and the three stages deliberately not sharing a
+  # machine. On macOS a fresh runner is the equivalent of a clean container - with
+  # one difference the scripts assert rather than assume: a container starts
+  # empty, while a runner image already carries Homebrew, cmake and ninja. Qt is
+  # the package that would make stage B vacuous and it is not in the image.
+  #
+  # One row here, for the same reason each container line has one: a daily run
+  # checks the current version of each packaging method, and for macOS that is
+  # whatever `macos-latest` is. The other two arm64 macOS versions the support
+  # matrix names - sequoia, and golden_gate behind the xcode-27 preview tag -
+  # would be rows of this same group, each on its own runner, because the
+  # producing runner is the bottle's compatibility floor and a bottle cannot be
+  # produced for an older macOS than the runner's. They are simply not in this
+  # pass.
+  pack-brew:
+    name: "A pack (${{ matrix.dist.name }})"
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          # The `expect` and `sfx_*` fields the container rows carry are absent
+          # here, and that is not an omission: they exist to select among four
+          # component packages, and this line produces one. Its identity is the
+          # formula name, which the stages read out of MANIFEST.tsv rather than
+          # being handed.
+          - name: brew
+            kind: brew
+    steps:
+      # No `Install bash` step, unlike the container stages: this platform ships
+      # one. No `container:` either, and that is the point of the group.
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      # The whole stage, in ci/pack-brew.sh: tap the repository that holds the
+      # formula, re-derive its source pin for this run's ref, build and bottle
+      # through Homebrew's own commands, write the bottle block back into the
+      # tap's copy of the formula, and collect the bottle plus that formula. The
+      # build type input does not reach this line: the formula pins Release
+      # itself, exactly as the Alpine line's recipe does.
+      - name: Pack
+        run: ci/pack-${{ matrix.dist.kind }}.sh
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ matrix.dist.name }}
+          path: out
+          if-no-files-found: error
+
+  verify-runtime-brew:
+    name: "B runtime (${{ matrix.dist.name }})"
+    # An exact dependency, which the container stages cannot express: there, one
+    # matrix carries every line and GitHub has no way to say "this row depends on
+    # that row", so those jobs are allowed to run and a row fails on its missing
+    # artifact instead. Here the producing job *is* a job.
+    needs: pack-brew
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          - name: brew
+            kind: brew
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-${{ matrix.dist.name }}
+          path: pkgs
+
+      # ci/runtime-brew.sh: prove the runner really has no Qt, tap and trust,
+      # put stage A's formula into the tap, serve the bottle on loopback, pour it
+      # - and insist that it was poured rather than built from source, which is
+      # the reading that says the bottle block and the bottle agree.
+      - name: Pour the bottle
+        run: ci/runtime-${{ matrix.dist.kind }}.sh
+
+      # The platform question, which is one script per platform rather than per
+      # distribution: ci/runtime-verify-macos.sh. MACOS_FACE picks the face, and
+      # there is one of those today - the self-contained .dmg line will add
+      # another, with the dependency assertion pointing the other way.
+      - name: Verify the installed programs
+        env:
+          MACOS_FACE: brew
+        run: ci/runtime-verify-macos.sh
+
+  verify-dev-brew:
+    name: "C dev (${{ matrix.dist.name }})"
+    needs: pack-brew
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dist:
+          - name: brew
+            kind: brew
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-${{ matrix.dist.name }}
+          path: pkgs
+
+      # ci/dev-brew.sh: the same pour as stage B, on a machine of its own, plus
+      # the QMdmm sources the consumer project builds. There is no separate dev
+      # package to install: one formula carries the runtime, the headers and the
+      # CMake package, so what this stage asks is not "does a second package
+      # resolve" but "is the one package enough to build against" - the same
+      # narrowing Arch's line makes.
+      - name: Install the formula
+        run: ci/dev-${{ matrix.dist.kind }}.sh
+
+      # The consumer project built against what the formula installed, and the
+      # executables it produces proven: ci/build-verify-macos.sh. It carries its
+      # own summary, written on the way out under a trap rather than by a step
+      # with `if: always()`, which is what a shell script expresses that as.
+      - name: Build the consumer project
+        run: ci/build-verify-macos.sh
+
+      # The rebuilt Bot against the installed Server, which is the half that
+      # needs port 6366: ci/run-verify-macos.sh.
+      - name: Run the rebuilt Bot against the installed Server
+        run: ci/run-verify-macos.sh

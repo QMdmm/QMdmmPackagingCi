@@ -30,8 +30,8 @@ compiler are one implementation with three arguments.
 
 The two questions stages B and C ask that are *not* per distribution are one
 script per platform instead: `ci/runtime-verify-linux.sh`, and the pair
-`ci/build-verify.sh` + `ci/run-verify-linux.sh` (the rebuilt Server runs in the
-first, while port 6366 is free, and the installed one in the second, so the
+`ci/build-verify-linux.sh` + `ci/run-verify-linux.sh` (the rebuilt Server runs in
+the first, while port 6366 is free, and the installed one in the second, so the
 rebuilt Bot has something to talk to). Those three read `DIST_KIND` for the two
 things that really do differ per line: the timeout's exit status and the loader's
 wording.
@@ -247,10 +247,59 @@ The key is long-lived on purpose. The line could generate a throwaway key per ru
 as the local verification did, but then the public half committed here would mean
 nothing and no one could ever check a published package against it.
 
+## The Homebrew line
+
+The Homebrew line asks the same three questions on macOS through the same three
+stages, and it is the one line whose recipe lives somewhere else: the formula is
+in [QMdmm/homebrew-qmdmm](https://github.com/QMdmm/homebrew-qmdmm), and this
+repository taps it instead of carrying a copy of its own. What stage A verifies
+is therefore the recipe a user gets, and a second copy could only drift from it.
+
+Three things are macOS's own:
+
+* **A fresh runner is the clean container.** A macOS runner cannot run a Linux
+  container, so `runs-on` is the machine, and the three jobs are a group of their
+  own rather than rows of the matrix above — `runs-on` and `container:` are
+  job-level keys and a row cannot differ from its neighbours in either. One
+  difference from a container is asserted rather than assumed: a container starts
+  out empty, while a runner image already carries Homebrew, cmake and ninja. Qt
+  is the package that would make stage B vacuous, and it is not in the image.
+
+* **There is no dev package.** One formula carries the programs, the headers and
+  the CMake package together, the way Arch's single package does, so stage C
+  asks not "does a second package resolve" but "is the one package enough to
+  build against". With a consequence the Linux lines do not have: `brew link`
+  puts a keg's `bin/` and `lib/` into the prefix but leaves `lib/cmake` inside
+  the keg, so a consumer does not find the CMake package by itself and
+  `build-verify-macos.sh` has to name the prefixes. It derives them rather than
+  listing them — every dependency the formula pulled in contributes its prefix,
+  which is what puts Qt's own sub-modules on the path without naming any of them.
+
+* **The criterion is "it poured", not "it installed".** A formula whose bottle
+  block disagrees with the bottle that was produced — a stale checksum, the file
+  named in the two-hyphen spelling, a tag for a different macOS — quietly falls
+  back to building from source. The stage would pass having verified nothing
+  about the bottle at all, so the install log is required to show a pour *and* to
+  show no source build.
+
+The platform verification is `ci/runtime-verify-macos.sh` and the pair
+`ci/build-verify-macos.sh` + `ci/run-verify-macos.sh` — one script per platform
+rather than per face, as on Linux, and tools differ in five places with one
+reading pointing the other way:
+
+| Linux | macOS |
+|---|---|
+| `ldd`, which resolves references and reports `not found` | `otool -L`, which lists load commands and does not resolve them: it can only show where a reference points. Resolving is left to the programs actually running, whose loader says `Library not loaded` / `image not found` |
+| the assertion is "nothing is unresolved" | built against Homebrew's Qt, every reference must point **into** `/opt/homebrew` — the self-contained `.dmg` face will want the opposite, which is why the script takes a face (`MACOS_FACE`) rather than assuming one |
+| `/proc/net/tcp`, read for `0A` / `01` | `lsof -t -nP -iTCP:6366 -sTCP:LISTEN` / `-sTCP:ESTABLISHED`, which answers with a pid or with nothing |
+| `timeout`, from coreutils or busybox | no coreutils in the image, and installing one would put more into `/opt/homebrew` than the line under test; a shell watchdog reports the same `124` for "still running when the clock ran out" |
+| `strings -a -e l`, for a QML path Qt stores as UTF-16 | this platform's `strings` is the LLVM one and has no `-e` at all — asking for it is an error, not an empty result. The path is read by deleting the NULs of its UTF-16 encoding instead |
+
 ## Running it
 
-Daily, on a schedule: the whole suite re-runs against `main` and `Release`, so a
-packaging regression surfaces within a day rather than at the next release. The
+Daily, on a schedule: the whole suite re-runs against `main` and `Release` — the
+four containers and the macOS jobs — so a packaging regression surfaces within a
+day rather than at the next release. The
 `cron` field reads `0 0 * * *`, but the field is not when the runs start:
 GitHub's scheduler has no timezone setting and launches scheduled runs hours
 after the trigger it was given. That lateness is stable per cron value but not
@@ -284,6 +333,15 @@ Inputs (dispatched runs only):
 Images: `debian:sid`, `fedora:latest`, `archlinux:base` and `alpine:latest`
 (the rolling pointers). Pinning per release and adding `fedora:rawhide` as a
 non-blocking weekly run is left for a later pass, once the manual flow is stable.
+
+The Homebrew line runs on `macos-latest` rather than on an image, which is also
+why it is a job group of its own. Its row is the one packaging method whose
+output is version-tagged by the machine it was built on: a bottle records the
+producing runner's macOS version, which is its compatibility floor, so supporting
+a second macOS would mean a second runner and a second row, not a second build on
+this one. Both `qmdmm_ref` and `build_type` apply here as they do everywhere; the
+build type does not reach the formula, which pins `Release` itself, exactly as
+the Alpine line's recipe does.
 
 ## Qt version matrix
 
