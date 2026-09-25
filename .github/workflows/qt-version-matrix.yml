@@ -68,7 +68,7 @@ jobs:
           - os: ubuntu-24.04
             qt: '6.8.*'
           - os: ubuntu-26.04
-            qt: '6.11.*'
+            qt: '6.11.2' # Stick to this version until upstream fix 6.11.3 packaging
 
     steps:
       - name: Set timezone
