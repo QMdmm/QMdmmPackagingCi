@@ -10,6 +10,14 @@
 # Server runs here, while port 6366 is free, and the installed one there.
 set -euxo pipefail
 
+# coreutils, for gtimeout, is a declared harness dependency the workflow installs
+# - the footing the Alpine line puts bash on. Checked here rather than left to
+# fail in the middle of a build, so it reads as itself.
+if ! command -v gtimeout >/dev/null; then
+  echo "::error::gtimeout is not on this runner; the workflow installs coreutils for it"
+  exit 1
+fi
+
 # The prefixes, named explicitly, and that is the line this stage diverges on.
 #
 # `find_package(QMdmm6)` and `find_package(Qt6)` both have to be answered, and an
@@ -74,7 +82,10 @@ failed=0
 #
 # `tail -n +2` and `[[:space:]]` rather than `\t`: BSD sed does not know that
 # escape, and a pattern that never matches would make the assertion below pass
-# vacuously. The reading is taken the same way in both scripts on purpose.
+# vacuously. The reading is taken the same way in both scripts on purpose, and so
+# is the shape that follows it: piping this into `grep -q` is safe because the
+# line is far under the pipe buffer, which runtime-verify-macos.sh measures and
+# qml_occurrences below does not get to assume.
 deps() { otool -L "$1" | tail -n +2 | sed -nE 's/^[[:space:]]*(\/[^ ]*).*/\1/p'; }
 for exe in consumer-build/qmdmm-gui/QMdmm6 \
            consumer-build/qmdmm-bot/QMdmmBot6 \
@@ -100,46 +111,39 @@ done
 # against this are recorded there. LC_ALL=C because tr stops at the first byte
 # sequence that is not valid UTF-8 under a UTF-8 locale, which is most of a
 # Mach-O.
-qml_hit() {
-  LC_ALL=C tr -d '\000' < "$1" | LC_ALL=C grep -a -q "$2"
+qml_occurrences() {
+  # The file, not a pipe, and the count rather than a yes: runtime-verify-macos.sh
+  # is where both were measured - a pipe into `grep -q` returned 141 on a hit, so
+  # the `if !` this replaced could never pass.
+  LC_ALL=C tr -d '\000' < "$1" > /tmp/qml-ascii.bin
+  LC_ALL=C grep -a -c -- "$2" /tmp/qml-ascii.bin || true
 }
 
 export QT_QPA_PLATFORM=offscreen
 export QT_QUICK_BACKEND=software
 
-run_until() {
-  local secs=$1 out=$2 err=$3
-  shift 3
-  "$@" >"$out" 2>"$err" &
-  local pid=$!
-  local ticks=$(( secs * 4 ))
-  local i=0
-  while [ "$i" -lt "$ticks" ]; do
-    kill -0 "$pid" 2>/dev/null || break
-    sleep 0.25
-    i=$(( i + 1 ))
+# The same two criteria as stage B and the Linux lines, read the same way:
+# gtimeout is GNU timeout, so what counts as "still running" is its 124, and 0 is
+# accepted here for the same reason it is there.
+timeout_rcs='0 124'
+survived() {
+  local r
+  for r in $timeout_rcs; do
+    [ "$1" = "$r" ] && return 0
   done
-  if kill -0 "$pid" 2>/dev/null; then
-    kill "$pid" 2>/dev/null
-    sleep 1
-    kill -9 "$pid" 2>/dev/null
-    wait "$pid" 2>/dev/null
-    return 124
-  fi
-  wait "$pid"
-  return $?
+  return 1
 }
 
 fatal() {
   grep -qiE 'Library not loaded|image not found|Symbol not found|Abort trap|Segmentation fault|Trace/BPT trap|Bus error' "$1"
 }
 
-run_until 20 /tmp/gui.out /tmp/gui.err consumer-build/qmdmm-gui/QMdmm6
+gtimeout 20 consumer-build/qmdmm-gui/QMdmm6 >/tmp/gui.out 2>/tmp/gui.err
 rc=$?
 echo "### rebuilt GUI rc=$rc"
 sed -e 's/^/  err| /' /tmp/gui.err
-if [ "$rc" -ne 124 ]; then
-  echo "::error::the rebuilt GUI exited with rc=$rc instead of running until the watchdog killed it"
+if ! survived "$rc"; then
+  echo "::error::the rebuilt GUI exited with rc=$rc"
   failed=1
 fi
 if fatal /tmp/gui.err; then
@@ -155,19 +159,21 @@ if grep -q 'No such file or directory' /tmp/gui.err; then
   echo "::error::the rebuilt GUI could not resolve its QML out of its own resources"
   failed=1
 fi
-if ! qml_hit consumer-build/qmdmm-gui/QMdmm6 '/qt/qml/QMdmm/Gui/qml/GameScene.qml'; then
+qml_hits=$(qml_occurrences consumer-build/qmdmm-gui/QMdmm6 '/qt/qml/QMdmm/Gui/qml/GameScene.qml')
+echo "### QML resource path occurrences in the rebuilt GUI: $qml_hits"
+if [ "${qml_hits:-0}" -lt 1 ]; then
   echo "::error::the rebuilt GUI does not carry its QML at qrc:/qt/qml/QMdmm/Gui/qml"
   failed=1
 fi
 
 # The rebuilt server on its own first, while 6366 is still free; the installed
 # one, in the next script, needs that port.
-run_until 10 /tmp/rserver.out /tmp/rserver.err consumer-build/qmdmm-server/QMdmmServer6
+gtimeout 10 consumer-build/qmdmm-server/QMdmmServer6 >/tmp/rserver.out 2>/tmp/rserver.err
 rc=$?
 echo "### rebuilt Server rc=$rc"
 sed -e 's/^/  err| /' /tmp/rserver.err
-if [ "$rc" -ne 124 ]; then
-  echo "::error::the rebuilt Server exited with rc=$rc instead of running until the watchdog killed it"
+if ! survived "$rc"; then
+  echo "::error::the rebuilt Server exited with rc=$rc"
   failed=1
 fi
 if fatal /tmp/rserver.err; then

@@ -40,7 +40,9 @@ Every job checks this repository out and downloads its artifacts *before* its
 stage script runs, so a script never has to be split around a `uses:` step. The
 three `Install bash` steps stay in the workflow — one per stage — because they
 run under `sh`, before bash exists on Alpine, which is the one thing a
-`#!/usr/bin/env bash` script cannot do.
+`#!/usr/bin/env bash` script cannot do. The two macOS stages carry an install of
+their own for the same kind of reason: `gtimeout` is not in the image, and
+coreutils is what provides it.
 
 ## Why the stages do not share a container
 
@@ -292,7 +294,7 @@ reading pointing the other way:
 | `ldd`, which resolves references and reports `not found` | `otool -L`, which lists load commands and does not resolve them: it can only show where a reference points. Resolving is left to the programs actually running, whose loader says `Library not loaded` / `image not found` |
 | the assertion is "nothing is unresolved" | built against Homebrew's Qt, every reference must point **into** `/opt/homebrew` — the self-contained `.dmg` face will want the opposite, which is why the script takes a face (`MACOS_FACE`) rather than assuming one |
 | `/proc/net/tcp`, read for `0A` / `01` | `lsof -t -nP -iTCP:6366 -sTCP:LISTEN` / `-sTCP:ESTABLISHED`, which answers with a pid or with nothing |
-| `timeout`, from coreutils or busybox | no coreutils in the image, and installing one would put more into `/opt/homebrew` than the line under test; a shell watchdog reports the same `124` for "still running when the clock ran out" |
+| `timeout`, from coreutils or busybox | coreutils is not in the image, so the workflow installs it as a harness dependency, the way the Alpine line installs bash. The reading is `gtimeout` — GNU timeout, so the same `124` for "still running when the clock ran out"; the `g` prefix is what keeps it from shadowing the BSD tools that were already here |
 | `strings -a -e l`, for a QML path Qt stores as UTF-16 | this platform's `strings` is the LLVM one and has no `-e` at all — asking for it is an error, not an empty result. The path is read by deleting the NULs of its UTF-16 encoding instead |
 
 ## Running it

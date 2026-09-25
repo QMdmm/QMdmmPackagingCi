@@ -520,6 +520,15 @@ jobs:
           name: packages-${{ matrix.dist.name }}
           path: pkgs
 
+      # coreutils, for gtimeout. The Linux lines have coreutils in the image;
+      # here it is a harness dependency the workflow installs, on the same footing
+      # as the `Install bash` step the Alpine line needs. It is not part of the
+      # package under test, and nothing it installs can stand in for the Qt the
+      # dependency assertion is about - the "this runner has no Qt" check runs in
+      # ci/runtime-brew.sh, before the formula is installed.
+      - name: Install coreutils (for gtimeout)
+        run: brew install coreutils
+
       # ci/runtime-brew.sh: prove the runner really has no Qt, tap and trust,
       # put stage A's formula into the tap, serve the bottle on loopback, pour it
       # - and insist that it was poured rather than built from source, which is
@@ -555,6 +564,11 @@ jobs:
         with:
           name: packages-${{ matrix.dist.name }}
           path: pkgs
+
+      # The same coreutils the B job installs, and ci/build-verify-macos.sh checks
+      # for gtimeout up front so a missing harness dependency reads as itself.
+      - name: Install coreutils (for gtimeout)
+        run: brew install coreutils
 
       # ci/dev-brew.sh: the same pour as stage B, on a machine of its own, plus
       # the QMdmm sources the consumer project builds. There is no separate dev
