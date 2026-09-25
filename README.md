@@ -365,6 +365,24 @@ Three scripts, two of them this line's own:
   Homebrew line runs, with the programs read out of the bundle and the dependency
   assertion pointing the other way.
 
+Stage B is the one place the two architectures part company, and it is a matrix
+of two rows: `macos-latest` for arm64 and `macos-26-intel` for x86_64. A
+universal image is not the same thing as a universal *reading* — a machine starts
+one slice, so the x86_64 slice only ever runs on Intel hardware, and Rosetta
+would answer a different question (what a translator makes of it) rather than the
+one an Intel user asks. Stage A stays a single job on purpose: one universal
+`.dmg` is built once, and both rows verify that same artifact.
+
+The Intel row is `macos-26-intel` rather than the older `macos-15-intel`, and
+that follows from the artifact instead of from a preference: nothing in this
+harness sets a deployment target, so CMake takes the host SDK's version as the
+floor, which makes the image's lowest supported macOS whatever `macos-latest`
+happened to be when it built it. On Sequoia the bundle could not load at all.
+Both rows therefore report the bundle's own `minos` in the summary, next to the
+architecture the machine actually is — `ci/runtime-macos.sh` asserts the second
+one, because a row that landed on the wrong architecture would silently run the
+other slice and duplicate its neighbour.
+
 ## Running it
 
 Daily, on a schedule: the whole suite re-runs against `main` and `Release` — the

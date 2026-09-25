@@ -600,10 +600,37 @@ jobs:
           MACOS_FACE: brew
         run: ci/runtime-verify-macos.sh
 
+  # Two rows, one per architecture, and this is the only place the image's
+  # x86_64 slice can be run at all. A universal image carries both slices but a
+  # machine starts one of them: on an arm64 runner that is the arm64 slice, so
+  # the x86_64 slice's first real execution has to happen on Intel hardware.
+  # Rosetta would not answer the same question - it translates, and a translated
+  # run says something about Rosetta rather than about what an Intel user gets.
+  #
+  # The producing job stays single, and deliberately: one universal .dmg is
+  # built once, and both rows verify that same artifact. What the matrix spreads
+  # is the *machine*, not the build.
+  #
+  # `macos-26-intel` and not `macos-15-intel`, and the reason is a property of
+  # the artifact rather than a preference: nothing in this harness sets a
+  # deployment target, so CMake takes the host SDK's version as the floor, and
+  # the image's lowest supported macOS is therefore whatever `pack-macos` built
+  # on. That is `macos-latest` - macOS 26 - so Sequoia could not load the bundle
+  # at all and the older Intel runner would only produce a dyld error. The row
+  # reads the floor as well as the slice, which is why ci/runtime-macos.sh
+  # reports the bundle's own minos rather than leaving it implied.
   verify-runtime-macos:
-    name: "B runtime (macos)"
+    name: "B runtime (macos-${{ matrix.mac.arch }})"
     needs: pack-macos
-    runs-on: macos-latest
+    runs-on: ${{ matrix.mac.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mac:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-26-intel
     steps:
       - name: Checkout this harness
         uses: actions/checkout@v7
@@ -626,7 +653,15 @@ jobs:
       # user to. That the copy is what gets run matters here more than it does
       # on the Homebrew line - the framework lookups are recorded in the
       # bundle's Info.plist and are only exercised by a copy that moved.
+      #
+      # MACOS_ARCH is the row's premise, handed to the script so it can assert it
+      # rather than assume it: a row labelled x86_64 that landed on an arm64
+      # machine would start the other slice and be a duplicate of its neighbour
+      # wearing a different name. The same reading also settles which Homebrew
+      # prefix the "no Qt here" check has to look in.
       - name: Mount the image and copy the application
+        env:
+          MACOS_ARCH: ${{ matrix.mac.arch }}
         run: ci/runtime-macos.sh
 
       # The verification script the Homebrew line runs, with the face switched:
