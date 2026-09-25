@@ -292,10 +292,68 @@ reading pointing the other way:
 | Linux | macOS |
 |---|---|
 | `ldd`, which resolves references and reports `not found` | `otool -L`, which lists load commands and does not resolve them: it can only show where a reference points. Resolving is left to the programs actually running, whose loader says `Library not loaded` / `image not found` |
-| the assertion is "nothing is unresolved" | built against Homebrew's Qt, every reference must point **into** `/opt/homebrew` — the self-contained `.dmg` face will want the opposite, which is why the script takes a face (`MACOS_FACE`) rather than assuming one |
+| the assertion is "nothing is unresolved" | on the `brew` face, built against Homebrew's Qt, every reference must point **into** `/opt/homebrew`; on the `dmg` face — the same `otool -L` reading with the opposite expectation — nothing may point outside the bundle and `/System` / `/usr/lib`. That is why the script takes a face (`MACOS_FACE`) rather than assuming one, and both faces are now in use |
 | `/proc/net/tcp`, read for `0A` / `01` | `lsof -t -nP -iTCP:6366 -sTCP:LISTEN` / `-sTCP:ESTABLISHED`, which answers with a pid or with nothing |
 | `timeout`, from coreutils or busybox | coreutils is not in the image, so the workflow installs it as a harness dependency, the way the Alpine line installs bash. The reading is `gtimeout` — GNU timeout, so the same `124` for "still running when the clock ran out"; the `g` prefix is what keeps it from shadowing the BSD tools that were already here |
 | `strings -a -e l`, for a QML path Qt stores as UTF-16 | this platform's `strings` is the LLVM one and has no `-e` at all — asking for it is an error, not an empty result. The path is read by deleting the NULs of its UTF-16 encoding instead |
+
+## The .dmg line
+
+The second macOS line, and the one whose product is not a package at all: a
+single universal `QMdmm-<version>-Darwin.dmg` holding a `QMdmm6.app` that carries
+its own Qt, a symlink to `/Applications` to drag it onto, and a readme. It is the
+install shape for a machine with no package manager in the picture — which is why
+it is also the only line with **no stage C**.
+
+Four things are this line's own:
+
+* **Qt is handed to it by the workflow.** Every other line takes Qt from the
+  platform: a distribution's packages, or the formula's `depends_on "qt"`. A
+  bundle cannot — it has to be built against an archive whose frameworks can be
+  copied into it, and Homebrew's Qt has QML plugins that are symlinks into the
+  Cellar, which dangle the moment they are copied. So the job installs the
+  official archive with `install-qt-action` and the stage reads `QT_ROOT_DIR` out
+  of it. The patch is pinned to an exact version rather than a `6.11.*` range, for
+  a measured reason: `aqtinstall`'s default hash algorithm is sha256, and Qt
+  publishes a package's `.sha256` only some time after a release lands, so a run
+  that floated onto a freshly published patch died with
+  `ChecksumDownloadFailure` before it had downloaded anything.
+
+* **One product for both architectures.** `CMAKE_OSX_ARCHITECTURES="x86_64;arm64"`
+  produces a universal bundle instead of an architecture matrix. It is not a free
+  choice: Homebrew ships no x86_64 macOS bottles any more, so this `.dmg` is the
+  only route an Intel machine has left. The stage asserts it rather than trusting
+  it — every Mach-O in the bundle has to be `x86_64 arm64`.
+
+* **There is no stage C, and its absence is a criterion rather than a gap.**
+  There is no dev package on macOS and the image carries no development content:
+  `macdeployqt` copies a framework's binary and `Resources` and drops its
+  `Headers`, so a bundle holds no `lib/cmake`, no `.pc` and no `.prl`. Where the
+  other lines prove a consumer can build against the dev package, this one asserts
+  that there is nothing to build against — the image's top level is exactly three
+  entries, and a fourth would be content nobody decided to ship.
+
+* **The criterion is "it is self-contained", not "it installed".** Stage B runs on
+  a runner with no Qt at all — asserted before anything is copied — and the
+  dependency assertion points the other way from the Homebrew line's: nothing may
+  resolve outside the bundle and the system. A program that starts under those
+  conditions can only have got its Qt out of the bundle.
+
+Three scripts, two of them this line's own:
+
+* `ci/pack-macos.sh` — stage A: fetch the ref, configure against the official Qt
+  for both architectures, build, `cpack -G DragNDrop`, then assert the shape of
+  the image on the **mounted** image: exactly three top-level entries, 18
+  frameworks in the bundle, all three platform plugins with `libqoffscreen.dylib`
+  among them, the ad-hoc signature verifying, and every Mach-O universal.
+* `ci/runtime-macos.sh` — stage B's first half: assert the runner has no Qt, mount
+  the image, and copy `QMdmm6.app` to `/Applications`, which is what the image's
+  own readme tells a user to do. That the copy is what gets run matters here: the
+  framework lookups live in the bundle's `Info.plist` and are only exercised by a
+  copy that moved.
+* `ci/runtime-verify-macos.sh` with `MACOS_FACE=dmg` — the verification the
+  Homebrew line runs, with the programs read out of the bundle and the dependency
+  assertion pointing the other way.
 
 ## Running it
 

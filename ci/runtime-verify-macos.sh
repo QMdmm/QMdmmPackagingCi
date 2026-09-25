@@ -2,7 +2,8 @@
 #
 # The macOS counterpart of ci/runtime-verify-linux.sh: the verification
 # question, in one file, for the faces this platform has. MACOS_FACE picks the
-# face; there is one today, `brew`, and the self-contained line adds `dmg`.
+# face; there are two of them, `brew` and `dmg`, and that switch is the whole of
+# the difference between the lines.
 #
 # Two things follow the face, and only two:
 #
@@ -54,9 +55,19 @@ case "$face" in
   brew)
     prefix=$(brew --prefix qmdmm)
     progdir="$prefix/bin"
+    libdir="$prefix/lib"
+    ;;
+  dmg)
+    # The self-contained face: the application bundle stage B copied onto this
+    # machine, carrying its own Qt. `prefix` is deliberately left unset here -
+    # the two places that used it address the bundle instead, and anything that
+    # reached for a prefix would be addressing a filesystem layout this face
+    # does not have.
+    progdir=/Applications/QMdmm6.app/Contents/MacOS
+    libdir=/Applications/QMdmm6.app/Contents/Frameworks
     ;;
   *)
-    echo "::error::MACOS_FACE must be 'brew' (or 'dmg', once that line lands); got '$face'"
+    echo "::error::MACOS_FACE must be 'brew' or 'dmg'; got '$face'"
     exit 1
     ;;
 esac
@@ -71,7 +82,7 @@ fi
 
 progs=("$progdir/QMdmm6" "$progdir/QMdmmServer6" "$progdir/QMdmmBot6")
 libs=()
-for f in "$prefix"/lib/libQMdmm*.dylib; do
+for f in "$libdir"/libQMdmm*.dylib; do
   [ -e "$f" ] && libs+=("$f")
 done
 
@@ -110,6 +121,21 @@ for t in "${targets[@]}"; do
     # earlier step - and the bottle would not carry that.
     if ! deps "$t" | grep -q '^/opt/homebrew/'; then
       echo "::error::$t resolves nothing into /opt/homebrew, so it did not link against the Qt the formula declares"
+      failed=1
+    fi
+  else
+    # The self-contained face, and the same `otool -L` reading with the
+    # opposite expectation: nothing may resolve *outside* the bundle and the
+    # system. `deps` prints absolute paths only, so a fully deployed bundle is
+    # one whose every absolute reference is /System or /usr/lib - Qt arrives
+    # through @rpath into Contents/Frameworks, a relative lookup that does not
+    # appear here at all. Anything else is a reference to a Qt prefix, to
+    # Homebrew, or to the directory it was built in, and each of those means the
+    # bundle is not self-contained after all.
+    outside=$(deps "$t" | grep -vE '^/(System|usr/lib)/' | grep -c . || true)
+    if [ "${outside:-0}" -ne 0 ]; then
+      echo "::error::$t resolves $outside path(s) outside the bundle and the system, so it is not self-contained:"
+      deps "$t" | grep -vE '^/(System|usr/lib)/' | sed -e 's/^/  /'
       failed=1
     fi
   fi
@@ -288,7 +314,11 @@ fi
   echo
   echo '```'
   found=0
-  for candidate in "$prefix/var/QMdmm/log" /usr/local/var/QMdmm/log "$HOME/Library/Application Support/QMdmm/log"; do
+  # `${prefix:+...}` because the dmg face has no install prefix, and this
+  # script runs under `set -u`. Not finding a log is not a failure: this block
+  # is evidence for the summary, not a criterion.
+  for candidate in "${prefix:+$prefix/var/QMdmm/log}" /usr/local/var/QMdmm/log "$HOME/Library/Application Support/QMdmm/log"; do
+    [ -n "$candidate" ] || continue
     [ -d "$candidate" ] || continue
     log=$(ls -1t "$candidate"/QMdmmServer-* 2>/dev/null | head -1)
     if [ -n "$log" ] && [ -s "$log" ]; then

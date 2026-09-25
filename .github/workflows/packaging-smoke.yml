@@ -504,6 +504,53 @@ jobs:
           path: out
           if-no-files-found: error
 
+  # ---- the second macOS line: the self-contained disk image -----------------
+  #
+  # The same stage and the same three questions, put to a different install
+  # shape: the line above bottles a formula whose Qt the machine provides, and
+  # this one packs a QMdmm6.app that carries its own Qt inside it. What the two
+  # share is everything the harness decides - how the ref is fetched, how the
+  # shell is laid out, how the artifact travels - and nothing about the product.
+  #
+  # It is the one line in this file that the workflow hands Qt to rather than
+  # the platform doing it. That is not a preference: a bundle has to be built
+  # against an archive whose frameworks can be copied into it, and Homebrew's Qt
+  # has QML plugins that are symlinks into the Cellar, which dangle the moment
+  # they are copied.
+  pack-macos:
+    name: "A pack (macos)"
+    runs-on: macos-latest
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      # Pinned to an exact patch rather than a `6.11.*` range, and the reason is
+      # measured rather than cautious: aqtinstall's default hash algorithm is
+      # sha256, Qt publishes a package's `.sha256` only some time after the
+      # release lands, and a run that floated onto a fresh patch died with
+      # `ChecksumDownloadFailure` before downloading anything at all. 6.11.2 is
+      # the newest patch that carries all three checksums.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          modules: 'qtwebsockets'
+
+      # The whole stage, in ci/pack-macos.sh: fetch QMdmm at this run's ref,
+      # configure against that archive for both architectures, build, pack a
+      # .dmg, and assert the shape of what came out - including that the image
+      # holds no development content, which is what stands in for this line's
+      # missing stage C.
+      - name: Pack
+        run: ci/pack-macos.sh
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-macos
+          path: out
+          if-no-files-found: error
+
   verify-runtime-brew:
     name: "B runtime (${{ matrix.dist.name }})"
     # An exact dependency, which the container stages cannot express: there, one
@@ -551,6 +598,45 @@ jobs:
       - name: Verify the installed programs
         env:
           MACOS_FACE: brew
+        run: ci/runtime-verify-macos.sh
+
+  verify-runtime-macos:
+    name: "B runtime (macos)"
+    needs: pack-macos
+    runs-on: macos-latest
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: packages-macos
+          path: pkgs
+
+      # The same coreutils the Homebrew line's B job installs, for the same
+      # reason: gtimeout is what the shared verification script times the
+      # programs with, and it is a harness dependency rather than anything the
+      # package under test brings.
+      - name: Install coreutils (for gtimeout)
+        run: brew install coreutils
+
+      # ci/runtime-macos.sh: assert this runner has no Qt, then mount the image
+      # and copy the application across the way the image's own readme tells a
+      # user to. That the copy is what gets run matters here more than it does
+      # on the Homebrew line - the framework lookups are recorded in the
+      # bundle's Info.plist and are only exercised by a copy that moved.
+      - name: Mount the image and copy the application
+        run: ci/runtime-macos.sh
+
+      # The verification script the Homebrew line runs, with the face switched:
+      # the programs come from the bundle, and the dependency assertion points
+      # the other way - nothing may resolve *out* of it. There is no stage C on
+      # this line, and that is not a gap: the image carries no development
+      # content, and ci/pack-macos.sh asserts exactly that.
+      - name: Verify the installed programs
+        env:
+          MACOS_FACE: dmg
         run: ci/runtime-verify-macos.sh
 
   verify-dev-brew:
