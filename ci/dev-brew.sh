@@ -96,9 +96,12 @@ done
   brew list --versions | sort
   echo '```'
   echo
-  echo 'The Qt CMake packages the consumer will be pointed at:'
+  echo 'The CMake packages the consumer will be pointed at, in the order it is'
+  echo 'given them - the Homebrew prefix first, because that is the only place'
+  echo "Qt's modules are all visible together:"
   echo
   echo '```'
+  echo "$(brew --prefix)/lib/cmake"
   for dep in $(brew deps --installed "$HOMEBREW_TAP/qmdmm"); do
     p=$(brew --prefix "$dep")
     [ -d "$p/lib/cmake" ] && echo "$p/lib/cmake"

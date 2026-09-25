@@ -20,17 +20,27 @@ fi
 
 # The prefixes, named explicitly, and that is the line this stage diverges on.
 #
-# `find_package(QMdmm6)` and `find_package(Qt6)` both have to be answered, and an
-# install prefix is not where either is found by default: Homebrew links a keg's
-# bin/ and lib/ into /opt/homebrew but leaves lib/cmake inside the keg, so a
-# CMake package does not show up on its own. On the four Linux lines the dev
-# package puts its CMake package where CMake looks, and no such line is needed.
+# `find_package(QMdmm6)` and `find_package(Qt6)` both have to be answered, and
+# the second one is why the Homebrew prefix itself leads the list rather than
+# following the dependencies: Qt's own CMake package looks for its sibling
+# modules only next to itself, while Homebrew keeps each module in its own keg,
+# so a list that names a module's keg - qtbase's - makes `find_package(Qt6)`
+# resolve Qt6 there and then fail to find WebSockets, which lives in
+# qtwebsockets' keg. The one place they are all visible together is
+# `$HOMEBREW_PREFIX/lib/cmake`, where linking each module's keg puts them.
 #
-# The list is derived rather than written out: every dependency the formula
-# pulled in contributes its prefix, which is what puts qtbase, qtdeclarative,
-# qtwebsockets and qtsvg - the Qt sub-modules the formula names, plus the one
-# qtdeclarative brings with it - on the path without naming any of them here.
-prefix_path=$(brew --prefix qmdmm)
+# Both readings are measured. With the keg prefixes alone the consumer configure
+# stops at `Failed to find required Qt component "WebSockets"`, having taken
+# Qt6_DIR from `/opt/homebrew/opt/qtbase/lib/cmake/Qt6`; with the Homebrew
+# prefix in front it resolves `Qt6_DIR=/opt/homebrew/lib/cmake/Qt6` and
+# configures. This is also what the earlier formula got for free: its `qt`
+# dependency was a formula whose whole install is a symlink farm of every
+# module, so the keg list happened to contain a directory where Qt was whole.
+#
+# The keg prefixes stay, after it, for the keg-only dependencies: their CMake
+# packages are not in the prefix. On the four Linux lines the dev package puts
+# its CMake package where CMake looks, and no such list is needed at all.
+prefix_path="$(brew --prefix qmdmm);$(brew --prefix)"
 for dep in $(brew deps --installed "$HOMEBREW_TAP/qmdmm"); do
   prefix_path="$prefix_path;$(brew --prefix "$dep")"
 done

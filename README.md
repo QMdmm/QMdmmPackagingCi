@@ -270,12 +270,15 @@ Three things are macOS's own:
 * **There is no dev package.** One formula carries the programs, the headers and
   the CMake package together, the way Arch's single package does, so stage C
   asks not "does a second package resolve" but "is the one package enough to
-  build against". With a consequence the Linux lines do not have: `brew link`
-  puts a keg's `bin/` and `lib/` into the prefix but leaves `lib/cmake` inside
-  the keg, so a consumer does not find the CMake package by itself and
-  `build-verify-macos.sh` has to name the prefixes. It derives them rather than
-  listing them — every dependency the formula pulled in contributes its prefix,
-  which is what puts Qt's own sub-modules on the path without naming any of them.
+  build against". With a consequence the Linux lines do not have: Qt's own CMake
+  package looks for its sibling modules only next to itself, and Homebrew keeps
+  each Qt module in its own keg, so `build-verify-macos.sh` has to name the
+  prefixes — and has to name the Homebrew prefix first. Naming the module kegs
+  alone makes `find_package(Qt6)` resolve Qt6 inside `qtbase`'s keg and then
+  fail to find `WebSockets`, which is in `qtwebsockets`'; the one place they are
+  all visible together is `$HOMEBREW_PREFIX/lib/cmake`. The rest of the list is
+  derived rather than written out — every dependency the formula pulled in
+  contributes its prefix, which is what covers the keg-only ones.
 
 * **The criterion is "it poured", not "it installed".** A formula whose bottle
   block disagrees with the bottle that was produced — a stale checksum, the file
