@@ -148,12 +148,18 @@ cp "$formula" out/qmdmm.rb
 # producing runner's macOS version, which is the compatibility floor, and it is
 # the one field here that must not be guessed at. `-E`, because the alternation
 # a BRE would need (`\|`) is a GNU extension this platform's sed does not have.
-tags=$(sed -nE 's/^  sha256 cellar: [^,]*, (arm64_[a-z_]*|x86_64_[a-z_]*|all): .*/\1/p' out/qmdmm.rb)
+#
+# Mind the indentation: `bottle do` sits at two spaces but `root_url` / `sha256`
+# are one level further in, so anchoring on the block's own indentation matches
+# nothing - and an empty read is indistinguishable from "the block has no tag",
+# which is what the first dispatched run reported while the tag sat right there.
+tags=$(sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, (arm64_[a-z0-9_]*|x86_64_[a-z0-9_]*|all):.*/\1/p' out/qmdmm.rb)
 echo "bottle tags written into the formula: $tags"
 case "$tags" in
   arm64_*) ;;
   *)
-    echo "::error::the bottle block carries no arm64 tag, and this runner is $(uname -m) on $(sw_vers -productVersion)"
+    echo "::error::no usable bottle tag in the formula's bottle block; this runner is $(uname -m) on $(sw_vers -productVersion). The block as written:"
+    sed -n '/bottle do/,/end/p' out/qmdmm.rb
     exit 1
     ;;
 esac
