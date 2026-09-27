@@ -14,21 +14,24 @@
 #     bundle leaves them dangling. So the workflow installs the official archive
 #     with install-qt-action and hands its root down as QT_ROOT_DIR.
 #
-#   five flags a distribution package does not need
+#   six flags a distribution package does not need
 #     CMAKE_PREFIX_PATH points at that archive; CMAKE_IGNORE_PREFIX_PATH keeps
 #     /opt/homebrew - which is where this image's cmake and ninja come from -
 #     out of the *search* path, so no package of the harness sneaks into the
 #     bundle's dependencies; CMAKE_OSX_ARCHITECTURES makes one universal product
 #     instead of an arch matrix; CMAKE_OSX_DEPLOYMENT_TARGET is read out of the
 #     archive's own QtCore instead of being left to the host SDK, which is what
-#     the bundle then declares; and the install prefix is not /usr, because a
-#     .dmg is not installed by a package manager.
+#     the bundle then declares; QMDMM_MACOS_APP_BUNDLE asks for the bundle shape,
+#     which the switch stopped defaulting to (the plain layout is what the
+#     Homebrew line bottles, so that is the shape a bare configure now gives);
+#     and the install prefix is not /usr, because a .dmg is not installed by a
+#     package manager.
 #
 #   the generator
 #     DragNDrop, which is what produces the .dmg - and is only configured at all
-#     when QMDMM_MACOS_APP_BUNDLE is ON, which is its default. A cpack run that
-#     cannot find the generator is therefore "the bundle shape did not happen",
-#     not a missing tool.
+#     when QMDMM_MACOS_APP_BUNDLE is ON, which the flag below is what asks for.
+#     A cpack run that cannot find the generator is therefore "the bundle shape
+#     did not happen", not a missing tool.
 set -euxo pipefail
 
 git init qmdmm-src
@@ -95,6 +98,7 @@ cmake -S qmdmm-src -B build -G Ninja \
   -DCMAKE_IGNORE_PREFIX_PATH=/opt/homebrew \
   -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" \
   -DCMAKE_OSX_DEPLOYMENT_TARGET="$qt_minos" \
+  -DQMDMM_MACOS_APP_BUNDLE=ON \
   -DBUILD_TESTING=OFF \
   -DQMDMM_EXPORT_PRIVATE=NO
 cmake --build build --parallel
