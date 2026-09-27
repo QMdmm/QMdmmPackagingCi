@@ -55,7 +55,11 @@ sed -i "s/-DCMAKE_BUILD_TYPE=Release/-DCMAKE_BUILD_TYPE=$QMDMM_BUILD_TYPE/" \
 # root, so both the checksum refresh and the build happen as an ordinary user -
 # updpkgsums is a wrapper around makepkg and is not assumed to be any more
 # forgiving. Stages B and C go back to root: installing is not building.
-useradd -m -s /bin/bash builder
+#
+# Creating the user has to tolerate it already existing: manjarolinux/base ships
+# a `builder` account, and an unguarded useradd exits 9 there and takes the job
+# with it. Nothing about the name is load-bearing - it only has to be unprivileged.
+id -u builder >/dev/null 2>&1 || useradd -m -s /bin/bash builder
 chown -R builder:builder arch-build
 su builder -c "cd '$PWD/arch-build' && updpkgsums"
 su builder -c "cd '$PWD/arch-build' && makepkg -f --noconfirm"
