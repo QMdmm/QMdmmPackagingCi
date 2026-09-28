@@ -69,6 +69,12 @@ jobs:
             qt: '6.8.*'
           - os: ubuntu-26.04
             qt: '6.11.*'
+          # IIRC macOS 26 removed some components which makes code depends on
+          # Qt 6.8 fails to build on macOS 26
+          - os: macos-15
+            qt: '6.8.*'
+          - os: macos-26
+            qt: '6.11.*'
 
     steps:
       - name: Set timezone
