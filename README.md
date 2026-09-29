@@ -453,14 +453,16 @@ LTS that is both still supported and at or above the floor — **6.8 and 6.11**;
 every other Qt 6 release has reached end of life — daily and on demand. 6.5 is
 not in the matrix: its configure failure comes from Qt's own helper (qtbase
 `721cfbd1`, picked to 6.7), so the floor was raised past it rather than worked
-around.
+around. 6.7 is absent for the other reason: it is the floor the project
+declares, but it has reached end of life as well, so the matrix starts one
+release above the floor rather than on it.
 
 It is a separate file rather than a fourth packaging stage, and it inherits
 nothing from `packaging-smoke.yml`: its `cron` is declared in its own file rather
 than assumed, and Qt comes from `install-qt-action`, because no runner image
 supplies these versions — Ubuntu 24.04 ships Qt 6.4.2, below the floor, and 26.04
-ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for
-6.11.
+ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for 6.11, and
+`macos-15` / `macos-26` for the same two releases on macOS.
 
 ```
 gh workflow run qt-version-matrix.yml -f qmdmm_ref=<branch|tag|full-sha>
