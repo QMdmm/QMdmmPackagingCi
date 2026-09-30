@@ -355,11 +355,13 @@ fi
     log=$(ls -1t "$candidate"/QMdmmServer-* 2>/dev/null | head -1)
     if [ -n "$log" ]; then
       echo "$log"
-      # Existence, not content. A server that starts and works has nothing to
-      # warn about, so a healthy run's log *is* empty: the file is created and
-      # nothing is ever written to it, and a release build compiles the debug
-      # output out besides. Gating on content would print "not found" about a
-      # log sitting right there, which is the reading this block replaces.
+      # Existence, not content. A server that starts and works warns about
+      # nothing, so a healthy run's log *is* empty: the file gets created and
+      # nothing is written to it. That is not a property of the build type -
+      # nothing here defines QT_NO_DEBUG_OUTPUT, so a release build's qDebug
+      # writes like any other - it is that the server has no qDebug to emit in
+      # the first place. Gating on content would print "not found" about a log
+      # sitting right there, which is the reading this block replaces.
       if [ -s "$log" ]; then
         tail -40 "$log"
       else
