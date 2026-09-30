@@ -321,31 +321,60 @@ if fatal /tmp/bot.err; then
   failed=1
 fi
 
-# The server's own log is the other side of that connection. Where it lives
-# follows the install prefix the package was built with, which is not worth
-# asserting: this is evidence for the summary, not a criterion.
+# The server's own log is the other side of that connection. Where it lives is
+# a run-time answer rather than one baked in when the project was configured:
+# the programs resolve their var/ against the tree they were installed into,
+# and on the bundle face - which is installed under no prefix at all - against
+# the identifier they carry, under the user's Application Support directory.
+# Which layout is in play is not asserted here: this block is evidence for the
+# summary, not a criterion, and the candidates below name the face each one
+# belongs to rather than leaving that to be worked out.
 {
   echo '### Server-side log'
   echo
   echo '```'
   found=0
-  # `${prefix:+...}` because the dmg face has no install prefix, and this
-  # script runs under `set -u`. Not finding a log is not a failure: this block
-  # is evidence for the summary, not a criterion.
-  for candidate in "${prefix:+$prefix/var/QMdmm/log}" /usr/local/var/QMdmm/log "$HOME/Library/Application Support/QMdmm/log"; do
+  # One candidate per face. `${prefix:+...}` because the dmg face has no install
+  # prefix and this script runs under `set -u`.
+  #
+  #   brew  the formula's prefix: its programs run out of $prefix/bin, so the
+  #         var/ they resolve is the one under the same prefix.
+  #   dmg   the identifier the bundle carries, me.fsu0413.QMdmm - the same
+  #         string as its CFBundleIdentifier - which is what names its var/
+  #         rather than a prefix it does not have.
+  #
+  # /usr/local/var/QMdmm/log used to be a third one. It was the default install
+  # prefix baked into the binary at configure time; the same install now
+  # resolves against the executable's own prefix, which is the `brew` candidate
+  # above whenever there is a prefix to resolve against at all. No face on this
+  # line installs under /usr/local without having named its prefix, so it is
+  # gone rather than left to be read as a layout this line still has.
+  for candidate in "${prefix:+$prefix/var/QMdmm/log}" "$HOME/Library/Application Support/me.fsu0413.QMdmm/var/QMdmm/log"; do
     [ -n "$candidate" ] || continue
     [ -d "$candidate" ] || continue
     log=$(ls -1t "$candidate"/QMdmmServer-* 2>/dev/null | head -1)
-    if [ -n "$log" ] && [ -s "$log" ]; then
+    if [ -n "$log" ]; then
       echo "$log"
-      tail -40 "$log"
+      # Existence, not content. A server that starts and works has nothing to
+      # warn about, so a healthy run's log *is* empty: the file is created and
+      # nothing is ever written to it, and a release build compiles the debug
+      # output out besides. Gating on content would print "not found" about a
+      # log sitting right there, which is the reading this block replaces.
+      if [ -s "$log" ]; then
+        tail -40 "$log"
+      else
+        echo "(empty: nothing was logged)"
+      fi
       found=1
       break
     fi
   done
   [ "$found" -eq 1 ] || echo "(no server log found in the usual places)"
   echo '```'
-} >> "$GITHUB_STEP_SUMMARY"
+  # `tee` rather than `>>`: a step summary is rendered for a browser, so a
+  # reading written there alone cannot be read back out of a run's log. This is
+  # the one block whose whole purpose is to be read back, so it goes to both.
+} | tee -a "$GITHUB_STEP_SUMMARY"
 
 kill "$bot_pid" "$server_pid" 2>/dev/null
 wait 2>/dev/null
