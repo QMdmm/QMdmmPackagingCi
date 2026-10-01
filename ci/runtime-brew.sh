@@ -2,8 +2,8 @@
 #
 # Stage B for the Homebrew line, in one file: assert the runner really has no
 # Qt, tap the repository, take stage A's formula (the one carrying the bottle
-# block), serve that bottle over loopback, pour it, and insist that it was
-# poured rather than built.
+# block), serve that bottle over loopback, pour it, insist that it was poured
+# rather than built, and run the recipe's own test block.
 #
 # See runtime-deb.sh for why stage B starts clean and installs by name. On macOS
 # there is no container to be clean in, so a fresh runner takes its place - with
@@ -125,6 +125,70 @@ if brew list --versions qt >/dev/null 2>&1; then
   exit 1
 fi
 echo "the three Qt sub-modules are here and the meta formula is not"
+
+# The recipe's own test. Nothing else in this harness runs it: `brew install`
+# does not call a formula's `test do` block, and none of the stages did either,
+# so the block was a claim nobody checked - it names one program and one option,
+# and either could stop existing with every job still green. The two stages do
+# run the installed programs, and more thoroughly, but that is their reading of
+# the package rather than the recipe's own; this is the one that says a user's
+# `brew test qmdmm` works.
+#
+# It runs against stage A's copy of the formula - the tap's own file with this
+# run's pin and bottle block written into it - so what is exercised is the block
+# a user gets rather than a second copy of it.
+cp "$tap_dir/Formula/qmdmm.rb" /tmp/qmdmm.rb.poured
+test_log=/tmp/brew-test.log
+# The first developer command in this stage. Homebrew turns developer mode on by
+# itself the first time one is called, once, with a warning in the middle of the
+# log; asking for it up front keeps that out of the way, which is what stage A
+# does for `brew bottle` for the same reason.
+brew developer on
+if ! brew test "$HOMEBREW_TAP/qmdmm" >"$test_log" 2>&1; then
+  echo "::error::the recipe's own test failed against the installed package"
+  sed -e 's/^/  test| /' "$test_log"
+  exit 1
+fi
+
+# ... and the same command has to come back non-zero on a block that cannot
+# pass, or the reading above would be one that cannot go red. The mutation is
+# the block's own subject - the program it names, removed from the equation -
+# and the guard right after it is what keeps this a mutation rather than a
+# silently vacuous control if the block is ever rewritten to name something else.
+sed -e 's|bin/"QMdmmServer6"|bin/"QMdmmServer6-not-installed"|' \
+  /tmp/qmdmm.rb.poured > "$tap_dir/Formula/qmdmm.rb"
+if ! grep -q 'QMdmmServer6-not-installed' "$tap_dir/Formula/qmdmm.rb"; then
+  echo "::error::the mutation did not reach the recipe's test block, so the negative control below would prove nothing. The block as it stands:"
+  sed -n '/^  test do/,/^  end/p' /tmp/qmdmm.rb.poured
+  exit 1
+fi
+bad_log=/tmp/brew-test-mutated.log
+if brew test "$HOMEBREW_TAP/qmdmm" >"$bad_log" 2>&1; then
+  echo "::error::the recipe's own test passed with a program that is not installed in it, so this stage is not reading the block"
+  sed -e 's/^/  test| /' "$bad_log"
+  exit 1
+fi
+echo "the mutated block is rejected, so the reading above can go red"
+# The poured copy back, so that what the summary below reads is what was poured.
+cp /tmp/qmdmm.rb.poured "$tap_dir/Formula/qmdmm.rb"
+
+{
+  echo
+  echo '### The recipe test block'
+  echo
+  echo 'The `test do` block in the recipe, run by `brew test` - the one command'
+  echo 'that executes it, and the one thing `brew install` does not do. Run'
+  echo 'against the tap copy stage A wrote, i.e. the block a user gets, and'
+  echo 'followed by the same command against a mutated copy as the control that'
+  echo 'says this reading can go red.'
+  echo
+  echo '`brew test` came back 0 against the poured package, and non-zero against a'
+  echo 'copy of the same block naming a program that is not installed. Its output:'
+  echo
+  echo '```'
+  cat "$test_log"
+  echo '```'
+} >> "$GITHUB_STEP_SUMMARY"
 
 {
   echo '### The pour'

@@ -593,6 +593,11 @@ jobs:
       # put stage A's formula into the tap, serve the bottle on loopback, pour it
       # - and insist that it was poured rather than built from source, which is
       # the reading that says the bottle block and the bottle agree.
+      #
+      # It ends with the recipe's own `test do` block, run through `brew test`,
+      # which is the only thing that executes it: an install does not. The same
+      # command follows against a copy of that block whose program is not
+      # installed, so the step's reading is one that can go red.
       - name: Pour the bottle
         run: ci/runtime-${{ matrix.dist.kind }}.sh
 
