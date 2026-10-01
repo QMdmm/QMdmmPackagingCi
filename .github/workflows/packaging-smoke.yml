@@ -529,16 +529,10 @@ jobs:
       - name: Checkout this harness
         uses: actions/checkout@v7
 
-      # Pinned to an exact patch rather than a `6.11.*` range, and the reason is
-      # measured rather than cautious: aqtinstall's default hash algorithm is
-      # sha256, Qt publishes a package's `.sha256` only some time after the
-      # release lands, and a run that floated onto a fresh patch died with
-      # `ChecksumDownloadFailure` before downloading anything at all. 6.11.2 is
-      # the newest patch that carries all three checksums.
       - name: Install Qt
         uses: jurplel/install-qt-action@v4
         with:
-          version: '6.11.2'
+          version: '6.12.*'
           modules: 'qtwebsockets'
 
       # The whole stage, in ci/pack-macos.sh: fetch QMdmm at this run's ref,
