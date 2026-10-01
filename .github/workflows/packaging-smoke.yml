@@ -152,7 +152,12 @@ env:
   # PACKAGER_PRIVKEY secret. abuild derives each signature's file name from the
   # private key's own name and apk resolves that name in /etc/apk/keys, so the two
   # file names have to agree for a package to be installable at all.
-  PACKAGER_KEY: qmdmm-release-6abe0b34
+  #
+  # This is the DAILY key. Alpine holds a second one, qmdmm-release-<hex>, which
+  # signs published packages; its private half is the `alpine` environment's
+  # SIGNING_KEY, and this workflow declares no environment, so it cannot reach it.
+  # Why there are two is in packaging/alpine/NOTES.md.
+  PACKAGER_KEY: qmdmm-daily-6abe0b34
   # ---- the Homebrew face ---------------------------------------------------
   # The tap the formula lives in, in Homebrew's own spelling: the repository is
   # QMdmm/homebrew-qmdmm and `brew tap` drops the prefix, so this is what both

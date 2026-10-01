@@ -14,14 +14,26 @@ write-up with the pitfall table: `nemn9852/qmdmm-maintenance#20`.
   afterwards for the CI line (`depends_dev`, see "Packaging-shape notes"). The
   local verification installed its toolchain by hand and never built a consumer
   against `-dev`, so a missing dependency declaration could not show up there.
-- `qmdmm-release-6abe0b34.rsa.pub` — the public half of the signing key. The private half
-  is the `PACKAGER_PRIVKEY` secret in `QMdmm/QMdmmPackagingCi`; the CI line copies
-  this file into the consuming container's `/etc/apk/keys/`. The name is the key's
-  whole identity: it is this file's name in every consumer's trust store and the
-  `.SIGN.RSA.` member of every package, and apk has no revocation, so rotating can
-  only change it by asking users to delete the old file by hand. It carries the
-  project rather than the machine — it was named after the machine's user only
-  because `abuild-keygen` had defaulted it during the local run of 2026-09-16.
+- `qmdmm-daily-6abe0b34.rsa.pub` — the **daily** key's public half. abuild calls
+  `abuild-sign` whether or not anyone asked it to, so every daily build has to hold
+  *some* key; this is the one it holds, and the private half is the
+  `PACKAGER_PRIVKEY` secret. Its output stays inside the workflow — smoke packages
+  travel as artifacts to stages B and C and are never published — so no consumer
+  ever needs this file and rotating it costs nobody anything. It was the line's
+  first key, called `qmdmm-release-6abe0b34` until 2026-10-01, when a second key
+  arrived and the two roles needed names; the hex is deliberately unchanged, so
+  that the pair reads as one key relabelled rather than as a rotation that never
+  happened.
+- `qmdmm-release-6abe2dbc.rsa.pub` — the **release** key's public half, and the
+  only one a consumer of a published repository should end up with: it is this
+  file's name in their `/etc/apk/keys/` and the `.SIGN.RSA.` member of every
+  published package. Its private half is the `alpine` environment's `SIGNING_KEY`
+  — an environment the daily workflow does not declare and therefore cannot reach.
+  The name is the key's whole identity, and apk has no revocation, so rotating it
+  can only mean asking every consumer to delete the old file by hand. Both names
+  carry the project rather than the machine; the one before them was
+  `neve-6aaaace6`, which `abuild-keygen` had defaulted from the machine's user
+  during the local run of 2026-09-16.
 
 ## Source tarball
 
@@ -93,14 +105,16 @@ that doesn't match (e.g. from a different git version or prefix).
   dir yields a `x86_64/x86_64/` not-found). To install into a clean container
   without `--allow-untrusted`, copy the **public** key
   (`~builder/.abuild/*.rsa.pub`) into its `/etc/apk/keys/` — in CI that is the
-  committed `qmdmm-release-6abe0b34.rsa.pub` next to this file. Signing cannot be switched
-  off: abuild calls `abuild-sign` for the packages and for the repository index
-  unconditionally and dies without a key, so the CI line signs with a long-lived
-  key rather than a per-run `abuild-keygen`. The public half is committed here,
-  the private half is the `PACKAGER_PRIVKEY` secret. abuild derives the signature
-  file name from the private key's own file name and apk resolves that name in
-  `/etc/apk/keys`, so the secret has to keep this file's basename — the workflow
-  asserts the two halves are the same pair before building anything.
+  committed `qmdmm-daily-6abe0b34.rsa.pub` next to this file (the release
+  workflow copies the other one). Signing cannot be switched off: abuild calls
+  `abuild-sign` for the packages and for the repository index unconditionally and
+  dies without a key, so the CI line signs with a long-lived key rather than a
+  per-run `abuild-keygen`. Which of the two pairs it signs with is decided by
+  `PACKAGER_KEY` and by the environment the job declares — see "Files" above for
+  what the two keys are for. abuild derives the signature file name from the
+  private key's own file name and apk resolves that name in `/etc/apk/keys`, so
+  the secret has to keep this file's basename — the workflow asserts the two
+  halves are the same pair before building anything.
 
 ## Packaging-shape notes (read before "fixing" anything)
 

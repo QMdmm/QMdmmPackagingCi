@@ -228,26 +228,46 @@ before any stage script can run.
 
 
 Signing is not optional on Alpine: abuild calls `abuild-sign` for the packages and
-for the repository index unconditionally and dies without a key. This repository
-holds one half of a key pair and the repository settings hold the other.
+for the repository index unconditionally and dies without a key. So the line holds
+two keys — one it signs every day's build with, one it publishes with — and the
+repository settings hold the private half of each.
 
-* `packaging/alpine/qmdmm-release-6abe0b34.rsa.pub` — the public half, copied into the
-  consuming container's `/etc/apk/keys/` by stages B and C.
-* the `PACKAGER_PRIVKEY` secret — the private half, written to
-  `~builder/.abuild/qmdmm-release-6abe0b34.rsa` in stage A, and nowhere else. Stage A
-  hands it over on that line's row only: the environment variable carrying it is
-  an expression on the matrix row, so the other three lines get an empty value.
+* `packaging/alpine/qmdmm-daily-6abe0b34.rsa.pub` — the **daily** key's public
+  half, copied into the consuming container's `/etc/apk/keys/` by stages B and C.
+  Nothing it signs is published, so no consumer is ever told to trust it.
+* `packaging/alpine/qmdmm-release-6abe2dbc.rsa.pub` — the **release** key's public
+  half, and the only one a consumer of a published repository should have in
+  `/etc/apk/keys/`. The release workflow is not written yet; when it is, this is
+  the file it points at.
+* the `PACKAGER_PRIVKEY` secret, at repository level — the daily key's private
+  half, written to `~builder/.abuild/qmdmm-daily-6abe0b34.rsa` in stage A, and
+  nowhere else. Stage A hands it over on that line's row only: the environment
+  variable carrying it is an expression on the matrix row, so the other three
+  lines get an empty value.
+* the `SIGNING_KEY` secret in the **`alpine` environment** — the release key's
+  private half, under the same secret name the other seven lines use, so that a
+  job reads `secrets.SIGNING_KEY` and the environment it declares is what picks
+  the line. The daily workflow declares no environment, so it cannot read this
+  one; that boundary, rather than a promise, is what keeps day-to-day signing off
+  the release key.
 
 The two file names have to agree: abuild derives each signature's file name from
 the private key's own file name and apk resolves that name in `/etc/apk/keys`, so
 a signature made with a differently named key is untrusted by construction. Stage
 A asserts the two halves are the same pair before it builds anything, which turns
 a mismatch into one clear message rather than an `UNTRUSTED signature` two stages
-later.
+later. Which of the two pairs a job uses is decided entirely by `PACKAGER_KEY`, a
+workflow-level variable, and by the environment the job declares.
 
-The key is long-lived on purpose. The line could generate a throwaway key per run,
-as the local verification did, but then the public half committed here would mean
-nothing and no one could ever check a published package against it.
+Both keys are long-lived, for different reasons. The daily one is kept rather than
+generated per run because a per-run `abuild-keygen` would give every day's packages
+a different `.SIGN.RSA.` member — the same detached signature, with no stable name
+to read in a log — and keeping one costs nothing, since nothing it signs is
+published. The release key is long-lived for the harder reason: the public half
+committed here is what a consumer checks a published package against, and apk has
+no revocation, so rotating it can only mean asking every consumer to replace the
+file by hand. That is also why the two are separate: the key whose name has to
+stay put is not the key that signs on every push.
 
 ## The Homebrew line
 
