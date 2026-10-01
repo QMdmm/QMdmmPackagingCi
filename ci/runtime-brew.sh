@@ -182,13 +182,23 @@ cp /tmp/qmdmm.rb.poured "$tap_dir/Formula/qmdmm.rb"
   echo 'followed by the same command against a mutated copy as the control that'
   echo 'says this reading can go red.'
   echo
-  echo '`brew test` came back 0 against the poured package, and non-zero against a'
-  echo 'copy of the same block naming a program that is not installed. Its output:'
+  echo '`brew test` against the poured package, which has to come back 0:'
   echo
   echo '```'
   cat "$test_log"
   echo '```'
-} >> "$GITHUB_STEP_SUMMARY"
+  echo
+  echo '... and the same command against the copy whose block names a program'
+  echo 'that is not installed, which has to come back non-zero, and for the'
+  echo 'reason the mutation describes. Its own last words:'
+  echo
+  echo '```'
+  if [ -s "$bad_log" ]; then tail -20 "$bad_log"; else echo '(it wrote nothing about it, so the exit status is the whole of the report)'; fi
+  echo '```'
+  # `tee` rather than `>>`: a step summary is rendered for a browser, so a
+  # reading written there alone cannot be read back out of a run's log. Both of
+  # these are the evidence for a criterion, so they go to both.
+} | tee -a "$GITHUB_STEP_SUMMARY"
 
 {
   echo '### The pour'
