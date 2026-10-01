@@ -152,7 +152,7 @@ env:
   # PACKAGER_PRIVKEY secret. abuild derives each signature's file name from the
   # private key's own name and apk resolves that name in /etc/apk/keys, so the two
   # file names have to agree for a package to be installable at all.
-  PACKAGER_KEY: neve-6aaaace6
+  PACKAGER_KEY: qmdmm-release-6abe0b34
   # ---- the Homebrew face ---------------------------------------------------
   # The tap the formula lives in, in Homebrew's own spelling: the repository is
   # QMdmm/homebrew-qmdmm and `brew tap` drops the prefix, so this is what both

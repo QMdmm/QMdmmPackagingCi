@@ -14,9 +14,14 @@ write-up with the pitfall table: `nemn9852/qmdmm-maintenance#20`.
   afterwards for the CI line (`depends_dev`, see "Packaging-shape notes"). The
   local verification installed its toolchain by hand and never built a consumer
   against `-dev`, so a missing dependency declaration could not show up there.
-- `neve-6aaaace6.rsa.pub` — the public half of the signing key. The private half
+- `qmdmm-release-6abe0b34.rsa.pub` — the public half of the signing key. The private half
   is the `PACKAGER_PRIVKEY` secret in `QMdmm/QMdmmPackagingCi`; the CI line copies
-  this file into the consuming container's `/etc/apk/keys/`.
+  this file into the consuming container's `/etc/apk/keys/`. The name is the key's
+  whole identity: it is this file's name in every consumer's trust store and the
+  `.SIGN.RSA.` member of every package, and apk has no revocation, so rotating can
+  only change it by asking users to delete the old file by hand. It carries the
+  project rather than the machine — it was named after the machine's user only
+  because `abuild-keygen` had defaulted it during the local run of 2026-09-16.
 
 ## Source tarball
 
@@ -88,7 +93,7 @@ that doesn't match (e.g. from a different git version or prefix).
   dir yields a `x86_64/x86_64/` not-found). To install into a clean container
   without `--allow-untrusted`, copy the **public** key
   (`~builder/.abuild/*.rsa.pub`) into its `/etc/apk/keys/` — in CI that is the
-  committed `neve-6aaaace6.rsa.pub` next to this file. Signing cannot be switched
+  committed `qmdmm-release-6abe0b34.rsa.pub` next to this file. Signing cannot be switched
   off: abuild calls `abuild-sign` for the packages and for the repository index
   unconditionally and dies without a key, so the CI line signs with a long-lived
   key rather than a per-run `abuild-keygen`. The public half is committed here,

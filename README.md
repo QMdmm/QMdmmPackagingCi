@@ -231,10 +231,10 @@ Signing is not optional on Alpine: abuild calls `abuild-sign` for the packages a
 for the repository index unconditionally and dies without a key. This repository
 holds one half of a key pair and the repository settings hold the other.
 
-* `packaging/alpine/neve-6aaaace6.rsa.pub` — the public half, copied into the
+* `packaging/alpine/qmdmm-release-6abe0b34.rsa.pub` — the public half, copied into the
   consuming container's `/etc/apk/keys/` by stages B and C.
 * the `PACKAGER_PRIVKEY` secret — the private half, written to
-  `~builder/.abuild/neve-6aaaace6.rsa` in stage A, and nowhere else. Stage A
+  `~builder/.abuild/qmdmm-release-6abe0b34.rsa` in stage A, and nowhere else. Stage A
   hands it over on that line's row only: the environment variable carrying it is
   an expression on the matrix row, so the other three lines get an empty value.
 
