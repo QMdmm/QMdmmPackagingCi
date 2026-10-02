@@ -343,11 +343,12 @@ Four things are this line's own:
   copied into it, and Homebrew's Qt has QML plugins that are symlinks into the
   Cellar, which dangle the moment they are copied. So the job installs the
   official archive with `install-qt-action` and the stage reads `QT_ROOT_DIR` out
-  of it. The patch is pinned to an exact version rather than a `6.11.*` range, for
-  a measured reason: `aqtinstall`'s default hash algorithm is sha256, and Qt
-  publishes a package's `.sha256` only some time after a release lands, so a run
-  that floated onto a freshly published patch died with
-  `ChecksumDownloadFailure` before it had downloaded anything.
+  of it. The version floats as a `6.12.*` range. It was pinned to one patch for a
+  while, for a measured hazard that is still there: `aqtinstall`'s default hash
+  algorithm is sha256, and Qt publishes a package's `.sha256` only some time after
+  a release lands, so a run that floats onto a freshly published patch can die
+  with `ChecksumDownloadFailure` before it has downloaded anything. The repair is
+  to pin that patch until upstream publishes its checksum.
 
 * **One product for both architectures.** `CMAKE_OSX_ARCHITECTURES="x86_64;arm64"`
   produces a universal bundle instead of an architecture matrix. It is not a free
@@ -469,7 +470,7 @@ the Alpine line's recipe does.
 declares `Qt ≥ 6.7`, but its own CI takes Qt from the distribution (6.10.2 on
 Ubuntu 26.04), so every release between the declared floor and that one had gone
 untested. The workflow builds QMdmm's own sources and runs `ctest` once per Qt
-LTS that is both still supported and at or above the floor — **6.8 and 6.11**;
+LTS that is both still supported and at or above the floor — **6.8 and 6.12**;
 every other Qt 6 release has reached end of life — daily and on demand. 6.5 is
 not in the matrix: its configure failure comes from Qt's own helper (qtbase
 `721cfbd1`, picked to 6.7), so the floor was raised past it rather than worked
@@ -481,7 +482,7 @@ It is a separate file rather than a fourth packaging stage, and it inherits
 nothing from `packaging-smoke.yml`: its `cron` is declared in its own file rather
 than assumed, and Qt comes from `install-qt-action`, because no runner image
 supplies these versions — Ubuntu 24.04 ships Qt 6.4.2, below the floor, and 26.04
-ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for 6.11, and
+ships 6.10.2. The runners split the same way: 24.04 for 6.8, 26.04 for 6.12, and
 `macos-15` / `macos-26` for the same two releases on macOS.
 
 ```
