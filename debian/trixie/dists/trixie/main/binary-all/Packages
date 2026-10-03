@@ -1,0 +1,55 @@
+Architecture: amd64
+Depends: libqt6core6, libqt6gui6, libqt6network6, libqt6websockets6, libqt6qml6, libqt6quick6, libqt6quickwidgets6, libqt6widgets6, qml6-module-qtquick
+Description: A game which is played in primary / high school
+Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
+Package: qmdmm-6
+Priority: optional
+Section: devel
+Version: 0.0.1
+Installed-Size: 4447
+Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-6.deb
+Size: 987694
+MD5sum: 7797de45302826da66db50cf43b44fc2
+SHA256: a7762da1ddad16972ce73a2b61d7dd9e68957ad362e32c466debac0b6ff07f27
+
+Architecture: amd64
+Description: A game which is played in primary / high school
+Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
+Package: qmdmm-common-dev
+Priority: optional
+Section: devel
+Version: 0.0.1
+Installed-Size: 57
+Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-dev-common.deb
+Size: 10850
+MD5sum: 58719db8287080519a6588ce2b968bc7
+SHA256: b34ae364b506b4de61d6db2136db44f13b0e23c32ff4fb0ecdfb4c5f01e7fd1c
+
+Architecture: amd64
+Depends: qmdmm-common-dev (= 0.0.1), qmdmm-6 (= 0.0.1), qt6-base-dev, qt6-declarative-dev, qt6-websockets-dev, qt6-tools-dev, cmake
+Description: A game which is played in primary / high school
+Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
+Package: qmdmm-6-dev
+Priority: optional
+Section: devel
+Version: 0.0.1
+Installed-Size: 36
+Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-dev6.deb
+Size: 5992
+MD5sum: 830df30055259b40c81cfb7abb54301f
+SHA256: 8812711534b3b1bd667474bbe4bf7d5b1d4c900ab4fe4c65b2f1c3951c423e8b
+
+Architecture: amd64
+Depends: qmdmm-common-dev (= 0.0.1)
+Description: A game which is played in primary / high school
+Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
+Package: qmdmm-doc
+Priority: optional
+Section: devel
+Version: 0.0.1
+Installed-Size: 5239
+Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-doc.deb
+Size: 1743792
+MD5sum: a47d5cc63a73079496892a18a51471a6
+SHA256: 99bc2044a87d13f136eb2289266ebfebea0bcb8c587f2a0c5f683870e272280c
+
