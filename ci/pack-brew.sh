@@ -118,7 +118,27 @@ brew install --build-bottle "$HOMEBREW_TAP/qmdmm"
 # serves its own copy of the bottle directory at that address. Nothing is
 # published from here - that is the release step's job, and it is not this
 # workflow's.
-brew bottle --json --root-url "$BOTTLE_ROOT_URL" "$HOMEBREW_TAP/qmdmm"
+# `--no-rebuild` is not a formality, and it is the only flag here that is doing
+# something rather than stating something. Homebrew numbers a bottle by reading
+# the tap's `origin/HEAD` formula and, *when it carries the same version as the
+# one being bottled*, writing that formula's number plus one. That is this
+# stage's case by construction: it clones the tap, which pins the tag being
+# released. The number goes in as a dotted `.1` beside the word `bottle`, and
+# this project's versions are semver, where a trailing `.1` reads as part of the
+# version rather than as "the second build of the same one" - so it is not
+# published. It buys nothing here either: the site and the formula are replaced
+# whole on every publish, so one bottle name is never asked to mean two things.
+#
+# The flag is upstream's own - `rebuild ||= if args.no_rebuild? || !tap … 0` in
+# `dev-cmd/bottle.rb`, ahead of the branch that derives the number, so it is not
+# a matter of the formula's block happening to carry one. Its help text is
+# narrower than its behaviour and reads as though it only edits the block.
+# The log says which way it went: with the flag, the
+# `Determining … bottle rebuild...` line never appears. (This machine cannot
+# re-run it locally to prove that - `/opt/homebrew` belongs to another account -
+# so the run log is where the reading comes from, and the guard below turns the
+# opposite outcome into a named failure rather than a strange filename.)
+brew bottle --json --no-rebuild --root-url "$BOTTLE_ROOT_URL" "$HOMEBREW_TAP/qmdmm"
 ls -l ./*.bottle.*
 
 # Writing the block back into the tap's copy is what makes the *tap's* file the
@@ -133,15 +153,36 @@ if ! grep -q '^  bottle do' "$formula"; then
 fi
 
 mkdir -p out/bottles
-for f in ./*.bottle.tar.gz; do
-  # The file `brew bottle` writes has two hyphens between the name and the
-  # version; the name a bottle's URL carries has one. A run that shipped the
-  # first spelling as the second would 404 on the pour, and the failure would
-  # read as "no bottle for this tag" rather than as a typo.
-  poured=${f#./}
-  poured=${poured/--/-}
-  cp "$f" "out/bottles/$poured"
-done
+# Matched by the widest shape `brew bottle` can write - `…bottle.tar.gz` and
+# `…bottle.<rebuild>.tar.gz` - and not by the shape this run expects, so that a
+# bottle carrying a rebuild segment is caught here and named. Written the narrow
+# way, the glob stays literal and the stage dies on
+# `cp: ./*.bottle.tar.gz: No such file or directory`, which says nothing about
+# the `.1` on the end of the file that is sitting right there. The first
+# dispatched run reported exactly that line. (`set --` costs nothing: this
+# script takes no arguments.)
+set -- ./[!_]*.bottle*.tar.gz
+if [ ! -e "$1" ]; then
+  echo "::error::brew bottle wrote no bottle archive in $(pwd). The .json is there, so the block did reach the formula; what is missing is the file every later stage pours."
+  exit 1
+fi
+if [ "$#" -ne 1 ]; then
+  echo "::error::expected one bottle for a single-arch build, found $#: $*"
+  exit 1
+fi
+case "$1" in
+  ./*.bottle.*.tar.gz)
+    echo "::error::the bottle carries a rebuild segment ($1). Versions here are semver, where a dotted suffix reads as part of the version, so a bottle so named is not published - see --no-rebuild above. If Homebrew numbered one anyway, that flag has stopped doing what it says."
+    exit 1
+    ;;
+esac
+# The file `brew bottle` writes has two hyphens between the name and the
+# version; the name a bottle's URL carries has one. A run that shipped the
+# first spelling as the second would 404 on the pour, and the failure would
+# read as "no bottle for this tag" rather than as a typo.
+poured=${1#./}
+poured=${poured/--/-}
+cp "$1" "out/bottles/$poured"
 cp "$formula" out/qmdmm.rb
 
 # Read back out of the bottle block rather than assumed: the tag is the
@@ -172,6 +213,13 @@ printf 'package\tversion\tfile\n' > out/MANIFEST.tsv
 for f in out/bottles/*.bottle.tar.gz; do
   printf 'qmdmm\t%s\t%s\n' "$version" "$(basename "$f")" >> out/MANIFEST.tsv
 done
+# A header with no row under it is a manifest every later stage reads as "this
+# run built nothing", and `publish-brew.sh` would go looking for a file that was
+# never named. Both are silent; this is not.
+if [ "$(awk 'NR > 1 { n++ } END { print n + 0 }' out/MANIFEST.tsv)" -ne 1 ]; then
+  echo "::error::the manifest lists no bottle. out/bottles holds: $(ls -A out/bottles 2>&1)"
+  exit 1
+fi
 
 {
   echo '### The bottle produced'

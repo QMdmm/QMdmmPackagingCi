@@ -72,7 +72,7 @@ formula="$PKGS/qmdmm.rb"
 # nobody fetches, and the pour would report it as "no bottle for this tag".
 case "$bottle" in
   "qmdmm-$version".*.bottle.tar.gz) ;;
-  *) echo "::error::the bottle is named '$bottle', which is not qmdmm-$version.<tag>.bottle.tar.gz - the name is part of the URL Homebrew builds"; exit 1 ;;
+  *) echo "::error::the bottle is named '$bottle', which is not qmdmm-$version.<tag>.bottle.tar.gz - the name is part of the URL Homebrew builds. A '.N' before the .tar.gz would be Homebrew's rebuild number, which this project does not publish: versions here are semver, where a dotted suffix reads as part of the version."; exit 1 ;;
 esac
 tag=$(printf '%s' "$bottle" | sed -E "s/^qmdmm-$version\.(.*)\.bottle\.tar\.gz$/\1/")
 

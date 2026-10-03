@@ -150,6 +150,24 @@ diff_lines=$({ diff -u "$old" "$W/qmdmm.rb" || true; } | tail -n +3)
 # `brew bottle --merge --write` puts one after the block it writes, and a rule
 # that rejected it would fail every release. A REMOVED blank line is still
 # refused, because that would mean this is deleting something of the tap's.
+# A `rebuild` line would be refused by the rule below as though it were a change
+# to the recipe. It is not that: it is one line of the block, and the one line of
+# it that must never be published from here. Homebrew numbers a bottle when the
+# tap's own formula already carries the version being bottled - which is this
+# one's case, since it pins the tag being released - and it spells the number as
+# a dotted `.1` on the end of the filename and a `rebuild 1` beside it.
+# Versions here are semver, so a `.1` against the version reads as part of it.
+# `pack-brew.sh` passes --no-rebuild for exactly this reason; this is where it
+# would surface if that flag stopped doing what it says.
+if printf '%s\n' "$diff_lines" | grep -qE '^\+[[:space:]]*rebuild[[:space:]]'; then
+  echo "::error::the bottle block being published carries a rebuild number:"
+  printf '%s\n' "$diff_lines" | grep -E '^\+[[:space:]]*rebuild[[:space:]]' | sed -e 's/^/  tap| /'
+  echo "   Bottle versions here are semver, so a dotted '.1' reads as part of the"
+  echo "   version rather than as a second build of the same one. pack-brew.sh"
+  echo "   asks Homebrew for --no-rebuild; this says that stopped being true."
+  exit 1
+fi
+
 bad=$(printf '%s\n' "$diff_lines" | awk '
   /^-/  { if ($0 !~ /^-[ \t]*(url|sha256|version)[ \t]/) print; next }
   /^\+/  { if ($0 ~  /^\+[ \t]*(url|sha256|version)[ \t]/) next
