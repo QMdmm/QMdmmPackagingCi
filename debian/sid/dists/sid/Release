@@ -2,13 +2,13 @@ Origin: QMdmm
 Label: QMdmm
 Suite: sid
 Codename: sid
-Date: Sat, 03 Oct 2026 02:18:46 UTC
+Date: Sat, 03 Oct 2026 02:43:40 UTC
 Architectures: all
 Components: main
 Description: QMdmm debian sid repository
 MD5Sum:
- 209471117c39c1273bbb4fe829eaffda             1940 main/binary-all/Packages
- 0aad6b08a57653e0bab0e8d476ddaab4              725 main/binary-all/Packages.gz
+ 3c4e24d9212f58ab4b2665cbe1614a84             1940 main/binary-all/Packages
+ 009f6e2a688cddfefd0efd1d6156d96a              724 main/binary-all/Packages.gz
 SHA256:
- 3dcc29122aedfa2b5eecc9334a12ab9517d1abe860b19424eaab7893c1a27402             1940 main/binary-all/Packages
- 2ce04d3e091f3edb68534e2035efdf8b339fab68d094e70e8dedcb1a35937238              725 main/binary-all/Packages.gz
+ 250a424ecf9c4f262410ad6d30eae8c4073b99db583e8c0e0db0925d3335491e             1940 main/binary-all/Packages
+ aa3cfafd4791639ac30c7372c003150bbe03daf4ac019c3d03eca2b0b54dbd9a              724 main/binary-all/Packages.gz

@@ -1,0 +1,25 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: QMdmm
+Label: QMdmm
+Suite: trixie
+Codename: trixie
+Date: Sat, 03 Oct 2026 02:33:04 UTC
+Architectures: all
+Components: main
+Description: QMdmm apt repository
+MD5Sum:
+ 08e27e9bea1e66ed97cfd9a45df7ccb2              637 main/binary-all/Packages
+ e9e599c9fcae944a59b57657fed30cfc              429 main/binary-all/Packages.gz
+SHA256:
+ 3fd7c81d6ffdcd9559cfec916e900c177abb58f9c1aca57928f202a96c45b28c              637 main/binary-all/Packages
+ 51927edf279d00a9ca11c69fbcc3c2a39458138bceaa5ef951981e3b21ad27b8              429 main/binary-all/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iJEEARYKADkWIQR2Zltsf2ckmdoNQCfmpyyXuM6DjQUCasBpYBsUgAAAAAAEAA5t
+YW51MiwyLjUrMS4xMiwwLDMACgkQ5qcsl7jOg409ZAEAh+OXEgu8deFf/bktX/XZ
+QxkNCs6c9bAWQLBJoS3ojesBALAf0xZlVocBcmupk/EqbQ9RcDIYNOUfmzcZ8q5v
+SpUC
+=HBwJ
+-----END PGP SIGNATURE-----
