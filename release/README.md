@@ -114,6 +114,38 @@ second dispatch of the same tag is a no-op rather than a failure. The tap stage
 compares what it is about to push against the tap and refuses anything beyond
 the pin and the block. The reasoning for each is at the top of its script.
 
+## Rehearsing a script here
+
+Every script under `release/` runs on the publish job's **ubuntu-latest** runner,
+while the scripts under `ci/` run on the platform they pack for — the Homebrew
+ones on macOS. That difference is not only about which tools exist. The same
+pattern can be read differently by two `grep`s, and a rehearsal on the wrong one
+certifies a gate that cannot pass where it actually runs.
+
+The case that put this section here: the manifest header check in
+`publish-brew.sh` was written
+
+    head -1 "$manifest" | grep -qE '^package\tversion\ttag\tfile$'
+
+`\t` is a tab to BSD grep (what this machine has) and a stray escape to GNU grep
+(what the runner has), where it becomes a literal `t` — so the pattern matched
+no header at all and refused every manifest, with `grep: warning: stray \ before
+t` sitting three lines above the refusal. Rehearsed here, it passed. The line
+reads four fields now (`IFS=$'\t' read`), which has no engine inside it.
+
+So when rehearsing one of these scripts on a machine that is not the runner, put
+the runner's tools first:
+
+    mkdir -p /tmp/gnu-tools
+    ln -sf "$(command -v ggrep)" /tmp/gnu-tools/grep
+    ln -sf "$(command -v gsed)"  /tmp/gnu-tools/sed
+    PATH=/tmp/gnu-tools:$PATH bash <the rehearsal>
+
+and give the shim teeth by also running it against the script as it was *before*
+the change: it has to reproduce what the runner did. `awk` is the remaining gap
+here — this machine has neither `mawk` nor `gawk`, so `awk` patterns are still
+reasoned about rather than read under the runner's engine.
+
 ## What is not here
 
 * **`rotate-line-local.sh`** — the rotation tool, still in the lab. It is on the
