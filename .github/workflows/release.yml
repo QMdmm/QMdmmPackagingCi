@@ -680,18 +680,22 @@ jobs:
           done
           echo "!! Pages never served ${GITHUB_SHA:0:7}"; exit 1
 
-  # ================================== publish (the macOS disk image)
-  # The second macOS product, and the only stage in this workflow that writes
-  # outside the repository it runs in. A .dmg is not an input to a recipe the way
-  # a bottle is - it is the product itself, and the page a person looks at to
-  # download it is the product's own release page. No token a workflow is issued
-  # can reach that page, so this one step carries PRODUCT_RELEASE_TOKEN, and it
-  # is the only thing in this file that does.
+  # ============================== publish (outside this repository)
+  # Two stages below write outside the repository this workflow runs in, and no
+  # token a workflow is issued can reach either place: the product's release
+  # page and the tap. Both carry CROSS_REPO_TOKEN - scoped to exactly those two
+  # repositories and to nothing else - and it is the only credential here that
+  # can write anywhere but here.
   #
-  # It runs after `publish` rather than beside it because the two are one
-  # publication: a run whose site failed has released nothing, and an image on a
-  # release whose repositories were never published would be the only thing
-  # anyone could get from it.
+  # Both run after `publish` rather than beside it, because all three are one
+  # publication: a run whose site failed has released nothing, and a .dmg on a
+  # release whose repositories were never published - or a bottle the tap does
+  # not point at - would be the only thing anyone could get from it.
+  #
+  # --- the macOS disk image ------------------------------------------------
+  # A .dmg is not an input to a recipe the way a bottle is: it is the product
+  # itself, and the page a person looks at to download it is the product's own
+  # release page.
   #
   # What it must never do is overwrite. The release it attaches to is assembled
   # by several runs, so the assets already on it are somebody else's; the script
@@ -716,8 +720,36 @@ jobs:
       # and published nothing" is the one outcome worth failing for.
       - name: Attach the disk image to the release
         env:
-          GH_TOKEN: ${{ secrets.PRODUCT_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
         run: bash "$PWD/release/publish-macos.sh" pkgs
+
+  # --- the Homebrew tap ----------------------------------------------------
+  # `publish` put the bottle on the site, but a bottle no formula points at has
+  # not been published: the tap is where `brew install` reads the address from,
+  # and writing there takes a credential that can reach outside this repository.
+  #
+  # What it writes is the formula the SITE now serves, not the one `publish`
+  # staged as an artifact - see release/publish-tap.sh for why the bytes a user
+  # can get are the ones that have to reach the tap. That is also why this job
+  # cannot run beside `publish`: it reads what the site serves, and `publish` is
+  # the thing that waited for the site to serve this run.
+  publish-tap:
+    name: "publish (the Homebrew tap)"
+    needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      # release/publish-tap.sh: the formula has to name a bottle that is really
+      # on the site and hash to what its own block says, the source pin has to
+      # be this release's tag, and what may differ from the tap's copy is
+      # bounded to the pin and the bottle block - the hand-written recipe is not
+      # this workflow's to edit. The push carries no --force, and what the tap
+      # holds afterwards is read back off the remote rather than taken from the
+      # push's exit status.
+      - name: Put this release's formula into the tap
+        env:
+          GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: bash "$PWD/release/publish-tap.sh"
 
   # ================================================================= trust
   # The path a real user walks: install the keyring, establish trust in the

@@ -54,7 +54,7 @@ cd "$(dirname "$0")/.."
 # reports success having published nothing - is the one outcome this whole
 # workflow is arranged to make impossible.
 if [ -z "${GH_TOKEN:-}" ]; then
-  echo "::error::GH_TOKEN is empty. It carries PRODUCT_RELEASE_TOKEN, a token for ${QMDMM_REPO:-the product repository} with contents:write; without it the disk image cannot be attached and this run has not published it."
+  echo "::error::GH_TOKEN is empty. It carries CROSS_REPO_TOKEN, the one credential here that can write outside this repository; without it the disk image cannot be attached and this run has not published it."
   exit 1
 fi
 command -v gh >/dev/null || { echo "::error::gh is not installed in this image"; exit 1; }

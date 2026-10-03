@@ -30,6 +30,7 @@ called differently (its repository was `lab`, so its package database was
 | `check-fingerprints.sh` | gate in the publish job | CI | nothing |
 | `publish-brew.sh` | publish: stage the bottle, write its address into the formula | CI, publish job | nothing |
 | `publish-macos.sh` | publish: attach the `.dmg` to the product repository's release | CI, publish job | **a token for the product repository** |
+| `publish-tap.sh` | publish: put this release's formula into the Homebrew tap | CI, publish job | **the same token** |
 | `consume-<consumer>.sh` | trust: install and verify as a consumer | CI, clean container | nothing |
 | `consume-apt-keyring.sh`, `consume-keyring-package.sh`, `consume-dnf-keyring-package.sh` | trust: the keyring bootstrap | CI, clean container | nothing |
 | `mkkeyring-deb.sh`, `mkkeyring-rpm.sh` | build the root-signed keyring source | **a trusted machine, never CI** | the **root** key |
@@ -50,8 +51,8 @@ anything: a bottle is verified by the checksum in the formula that points at it
 and the `.dmg` by the ad-hoc signature `macdeployqt` applies, and neither has a
 subkey to sign with.
 
-They also publish to two different places, which is the part worth stating
-plainly:
+They also publish to three different places, and the last two are why this
+directory holds a credential at all:
 
 * **the bottle goes to the site**, beside the twelve package lines and under the
   same `GITHUB_TOKEN` the rest of the publish job uses, because that address is
@@ -59,13 +60,23 @@ plainly:
   writes the address into the formula in one step, so the URL and the file it
   names cannot come from two different opinions. The formula a tap should carry
   is published beside the bottle as `brew/qmdmm.rb`.
+* **that formula goes into the tap**, because a bottle no formula points at has
+  not been published: the address a user's `brew install` reads is the one in
+  `QMdmm/homebrew-qmdmm`. `publish-tap.sh` fetches the formula back off the site
+  rather than taking the artifact the publish job staged, so what reaches the tap
+  is the bytes a user can get; and it may rewrite only the pin and the bottle
+  block, because the recipe itself is hand-written and not this workflow's to
+  edit.
 * **the `.dmg` goes to the product repository's release**, because it is not an
   input to a recipe - it is the product, and the page a person downloads it from
-  is the product's own. No token a workflow is issued can write there, so this is
-  the one stage in this directory that carries a credential of its own
-  (`PRODUCT_RELEASE_TOKEN`, the `publish-macos` job). It attaches to a release
-  that already exists and never overwrites an asset; the reasoning is at the top
-  of the script.
+  is the product's own.
+
+No token a workflow is issued can write to either of the last two places, so one
+credential covers both jobs: `CROSS_REPO_TOKEN`, scoped to `QMdmm/QMdmm` and
+`QMdmm/homebrew-qmdmm` and to nothing else. The `.dmg` stage attaches to a
+release that already exists and never overwrites an asset; the tap stage
+compares what it is about to push against the tap and refuses anything beyond
+the pin and the block. The reasoning for each is at the top of its script.
 
 ## What is not here
 
