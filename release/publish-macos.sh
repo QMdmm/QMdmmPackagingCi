@@ -25,14 +25,17 @@
 # replacement, fails here even though `gh` would have said it succeeded.
 #
 # And of the asset this run does produce: one that is already there is never
-# overwritten. Nothing here passes --clobber, and the check below is not the
-# default's error message dressed up - it runs *before* the upload and compares
-# what GitHub already holds against what this run built, so an asset that is
-# there and different is a refusal that says why rather than a 422 that says
-# "exists". Re-dispatching a release therefore cannot silently replace the .dmg
-# somebody may already have downloaded; a person has to delete it on purpose.
-# An asset that is there and *identical* is reported as already published and
-# is not an error, because nothing is being overwritten in that case either.
+# replaced, and is not a reason to fail a run either. A release page carries one
+# file per product name, and a second dispatch of the same tag is a rebuild of
+# the same version rather than a new artifact - the .dmg is not reproducible
+# (cpack writes a creation date into the image), so its bytes will differ and
+# mean nothing. What this stage does then is report what the release holds and
+# stop, which is how every other publish stage treats a repeat: the bottle and
+# the formula are replaced whole, and this one is deliberately written once.
+# Replacing it would swap a file somebody may already have downloaded; failing
+# would make every re-dispatch red over a difference that belongs to the tool
+# rather than to the release. Whoever means to replace it deletes the asset on
+# the release first - then this stage finds nothing there and uploads.
 #
 # usage: publish-macos.sh <pack-macos artifact dir>
 # env:   GH_TOKEN     (the product repository's token; absent is a hard failure)
@@ -122,25 +125,45 @@ before=$(printf '%s\n' "$assets" | cut -f1 | awk 'NF' | sort || true)
 here=$(printf '%s\n' "$assets" | awk -F'\t' -v n="$dmg_name" '$1==n {print $2"|"$3}')
 if [ -n "$here" ]; then
   old_size="${here%%|*}"; old_digest="${here#*|}"
-  if [ "$old_digest" = "$digest" ]; then
+  if [ "$old_digest" != "-" ] && [ "$old_digest" = "$digest" ]; then
     echo "already published, and identical: $dmg_name ($size bytes, $digest) - nothing to do"
-    {
-      echo '### The macOS disk image'
-      echo
-      echo "\`$dmg_name\` is already on release \`$TAG\` in \`$slug\` with the"
-      echo "same sha256 this run built (\`$digest\`), so it was left alone."
-    } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
-    exit 0
+    because='This run built byte for byte what the release already carries.'
+  else
+    echo "already published: $dmg_name is on release $TAG, so this run attaches nothing"
+    echo "   already there:  $old_size bytes, $old_digest"
+    echo "   this run built: $size bytes, $digest"
+    echo "   A .dmg is not reproducible - cpack writes a creation date into the"
+    echo "   image - so a rebuild of the same version differs in bytes while"
+    echo "   meaning the same thing. The release keeps the file it has: replacing"
+    echo "   it would swap one somebody may already be holding, and refusing over"
+    echo "   it would make every re-dispatch red for a difference that belongs to"
+    echo "   the tool rather than to the release."
+    echo "   To replace it on purpose, delete the asset on the release and dispatch"
+    echo "   again - then this stage finds nothing there and uploads."
+    if [ "$old_digest" = "-" ]; then
+      because='The release API reported no digest for that asset, so the two could not be compared. An asset whose hash cannot be read is never treated as identical - and is not replaced either.'
+    else
+      because='This run built the same version again. The bytes differ because the image is not reproducible, and a release is written once: that is the tool talking, not the release.'
+    fi
   fi
-  echo "::error::$slug's release $TAG already carries an asset named $dmg_name, and it is not the one this run built."
-  echo "   on the release: $old_size bytes, $old_digest"
-  echo "   this run built: $size bytes, $digest"
-  echo "   Nothing is overwritten from here. If the new image should replace it, delete the asset on the release and dispatch again; if the old one is right, this run's image is a rebuild of the same version and the difference is in the build rather than in the upload."
-  exit 1
+  {
+    echo '### The macOS disk image'
+    echo
+    echo "Release \`$TAG\` of \`$slug\` already carries \`$dmg_name\`, so nothing"
+    echo 'was attached and nothing was replaced. What the release holds:'
+    echo
+    echo '```'
+    printf '%s\n' "$assets" | sed -e 's/\t/  /g'
+    echo '```'
+    echo
+    echo "$because"
+  } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
+  exit 0
 fi
 
-# No --clobber, deliberately: the check above is what decides, and passing the
-# flag would also re-decide it for anyone who later rearranges this script.
+# No --clobber, deliberately: this line is reached only when the release does not
+# carry the name at all, so there is nothing to clobber - and the flag would
+# re-decide that for anyone who later rearranges this script.
 gh release upload "$TAG" "$dmg" -R "$slug"
 
 # Read back off the release rather than off gh's exit status: what matters is

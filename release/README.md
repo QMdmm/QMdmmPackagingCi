@@ -74,7 +74,9 @@ directory holds a credential at all:
 No token a workflow is issued can write to either of the last two places, so one
 credential covers both jobs: `CROSS_REPO_TOKEN`, scoped to `QMdmm/QMdmm` and
 `QMdmm/homebrew-qmdmm` and to nothing else. The `.dmg` stage attaches to a
-release that already exists and never overwrites an asset; the tap stage
+release that already exists and never replaces an asset: one already under the
+name means the release is written once and this run attaches nothing, so a
+second dispatch of the same tag is a no-op rather than a failure. The tap stage
 compares what it is about to push against the tap and refuses anything beyond
 the pin and the block. The reasoning for each is at the top of its script.
 

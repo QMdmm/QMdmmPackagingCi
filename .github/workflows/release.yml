@@ -701,6 +701,12 @@ jobs:
   # by several runs, so the assets already on it are somebody else's; the script
   # reads the asset names before the upload and again after it and refuses to
   # accept a difference other than the one file it was handed.
+  #
+  # An asset already under this run's name is a different case, and it is not a
+  # failure: a .dmg is not reproducible, so a re-dispatch of the same tag builds
+  # different bytes for the same version, and the release keeps the file it has.
+  # The stage reports that and stops, which makes a re-dispatch a no-op the way
+  # the bottle and the formula stages are.
   publish-macos:
     name: "publish (the macOS disk image)"
     needs: [publish]
@@ -714,10 +720,11 @@ jobs:
           path: pkgs
       # release/publish-macos.sh: the release has to exist before a run is
       # dispatched, the image's version has to be the release's tag, an asset
-      # already under this name is never replaced, and what the upload did is
-      # read back off the release rather than taken from the upload's exit
-      # status. A missing token is a failure rather than a skip, because "ran
-      # and published nothing" is the one outcome worth failing for.
+      # already under this name means this run attaches nothing, and what the
+      # upload did is read back off the release rather than taken from the
+      # upload's exit status. A missing token is a failure rather than a skip,
+      # because "ran and published nothing" is the one outcome worth failing
+      # for.
       - name: Attach the disk image to the release
         env:
           GH_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
