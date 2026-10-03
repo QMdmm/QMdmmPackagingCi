@@ -5,20 +5,20 @@ Origin: QMdmm
 Label: QMdmm
 Suite: trixie
 Codename: trixie
-Date: Sat, 03 Oct 2026 09:00:14 UTC
+Date: Sat, 03 Oct 2026 14:03:26 UTC
 Architectures: all
 Components: main
 Description: QMdmm debian trixie repository
 MD5Sum:
- 1897731c6161c3f4c27179255aaaaf10             1939 main/binary-all/Packages
- a2a8c679732c66c28360526c9f313bf2              720 main/binary-all/Packages.gz
+ 2e9ab6f612d78a1e9cc234eb6e01abf9             1939 main/binary-all/Packages
+ e95d8e2daf2aa6d39f05a5dc3debe144              722 main/binary-all/Packages.gz
 SHA256:
- 267d8a1bed2ac01c300dec85738718c13a7c93984183cce3682d42b23b2dd104             1939 main/binary-all/Packages
- 26738ee2f01c106ed6f7ef578fbbceab00e673a26a82db033a32b8f232c9a5d7              720 main/binary-all/Packages.gz
+ b35d52238e603f1a3573ac20a4c0ef55940ce8b40b35e2129b22fab86eba98c5             1939 main/binary-all/Packages
+ 46714491d644272276631a84f008afc6673f2052d6336b3d93d5afa2f9a29342              722 main/binary-all/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQR/ZMrr6JwGPR8Q+2Pw4LyjHbghGAUCasDEHgAKCRDw4LyjHbgh
-GPrZAP9asqqfaxSK+nYqcH707V0SPKNiPD3hzX9TgUm/Y2cKAAD/Ud7HSHobUCI9
-qwUwTQhTO4VGb6L0+FQSfT4gWJR/UQ0=
-=oC3i
+iHUEARYKAB0WIQR/ZMrr6JwGPR8Q+2Pw4LyjHbghGAUCasELLgAKCRDw4LyjHbgh
+GCh5AP9qjzf75Emg8T44g0qYabwnVN/WBiZ4C/XTSiFpR7Ww6gD+K3vz+Y3UNvw9
+61NvlbPsgJX1/RPKWTupo6lRPkzo5gU=
+=TQCl
 -----END PGP SIGNATURE-----

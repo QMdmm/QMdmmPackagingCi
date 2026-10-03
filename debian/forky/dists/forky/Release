@@ -2,13 +2,13 @@ Origin: QMdmm
 Label: QMdmm
 Suite: forky
 Codename: forky
-Date: Sat, 03 Oct 2026 09:00:08 UTC
+Date: Sat, 03 Oct 2026 14:03:32 UTC
 Architectures: all
 Components: main
 Description: QMdmm debian forky repository
 MD5Sum:
- 1ceed41fe34d5bb528fc2fc6ebb8487d             1940 main/binary-all/Packages
- 1ed8a220b10ae5aea3c7fe2a7f189092              723 main/binary-all/Packages.gz
+ 048ca35551a96cfe25e96350e77f17cd             1940 main/binary-all/Packages
+ 28e95b3206edb636d0555be1e2bb7a7c              723 main/binary-all/Packages.gz
 SHA256:
- 547df314cb059b0cc4b23c0a6f6e952a091a812a0f32a77f0e217e5aaed06679             1940 main/binary-all/Packages
- e8813d831041143c21406db9bfefdd36a82d407202d124868316dbf0e8f8f3d9              723 main/binary-all/Packages.gz
+ c718be02503b37cfe72b5251ff9d1742556cbe2b81faeb6876ec7f6d99b2e90e             1940 main/binary-all/Packages
+ cf7b4f8dc74becfbe041c85b61e49a798ae45c0aff6cc574f3dae81eda664749              723 main/binary-all/Packages.gz

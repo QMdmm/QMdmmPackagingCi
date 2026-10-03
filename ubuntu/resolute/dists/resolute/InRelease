@@ -5,20 +5,20 @@ Origin: QMdmm
 Label: QMdmm
 Suite: resolute
 Codename: resolute
-Date: Sat, 03 Oct 2026 09:00:13 UTC
+Date: Sat, 03 Oct 2026 14:03:34 UTC
 Architectures: all
 Components: main
 Description: QMdmm ubuntu resolute repository
 MD5Sum:
- df5251de26e00285884a434edde38e1e             1940 main/binary-all/Packages
- c3a3f455139c23221c22cb74d35d9dea              725 main/binary-all/Packages.gz
+ d7e6137ec201125a8daac43f38dbea38             1940 main/binary-all/Packages
+ 5997dfdf05aad9bc381c72086a99f01e              724 main/binary-all/Packages.gz
 SHA256:
- d480db94fc5fa365efd15a925a7cc4f1b39461d930d78592de64f893cb31c114             1940 main/binary-all/Packages
- 42c955ee063ae7ae0c120e17787ac356a2977c88d6bcd6760186c4690ebbc94f              725 main/binary-all/Packages.gz
+ f7e7e7335fe0d06ab0a20e6e5951a538058bf6b8c526425e76a092d62b98f2ec             1940 main/binary-all/Packages
+ 18008b3f7e4f3bed0ced20c091ecd554fc5cfaaa5de758136b4480af8d2dd0ec              724 main/binary-all/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQRt02UhWE3wDkNLBmMGBOoveleEVAUCasDEHQAKCRAGBOoveleE
-VBAgAQCPGGlxfve5nRQftGbtLQNxLKPyMQMhJpq4pUQNrjjjxwD9F5OuggZwnItN
-m3rXcxytd/C7qq2R6i3gAwja/NPywwc=
-=8Bsd
+iHUEARYKAB0WIQRt02UhWE3wDkNLBmMGBOoveleEVAUCasELNgAKCRAGBOoveleE
+VIM5AQCD1oJDNivBuwmsPMipsO5F554EO5TB8RnrL1cfuxDitAD/XIGaaSK7mm1Y
+i/J7W1pU214VMO8xISSwy6WoeY1MyAM=
+=a0tP
 -----END PGP SIGNATURE-----
