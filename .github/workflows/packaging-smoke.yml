@@ -472,7 +472,22 @@ jobs:
   # would be rows of this same group, each on its own runner, because the
   # producing runner is the bottle's compatibility floor and a bottle cannot be
   # produced for an older macOS than the runner's. They are simply not in this
-  # pass.
+  # pass; the release workflow is the one that runs all three.
+  #
+  # Because this row deliberately does not declare a macOS, it does not hand
+  # ci/pack-brew.sh a tag it claims either: it asks Homebrew what it would name
+  # a bottle built here and passes that answer along, so the stage's comparison
+  # against the same answer is a tautology on this line by construction. The
+  # comparison has teeth on the release line, where each row names its macOS and
+  # the runner is pinned to it; what this line keeps is the reading of which
+  # macOS a bottle built today is actually for, which is what the block below
+  # carries and what stages B and C then hold it to.
+  #
+  # The merge job in between is not symmetry. The formula's bottle block is
+  # written by ci/merge-brew.sh and by nothing else now, so a line that skipped
+  # it would have no block for stage B to pour from - and running it daily is
+  # also what keeps that mechanism from being rehearsed only on the day a
+  # release is cut.
   pack-brew:
     name: "A pack (${{ matrix.dist.name }})"
     runs-on: macos-latest
@@ -495,17 +510,95 @@ jobs:
 
       # The whole stage, in ci/pack-brew.sh: tap the repository that holds the
       # formula, re-derive its source pin for this run's ref, build and bottle
-      # through Homebrew's own commands, write the bottle block back into the
-      # tap's copy of the formula, and collect the bottle plus that formula. The
-      # build type input does not reach this line: the formula pins Release
-      # itself, exactly as the Alpine line's recipe does.
+      # through Homebrew's own commands, and collect this row's bottle, its JSON
+      # and the pinned formula. It writes no block - a block carries one checksum
+      # per macOS and this stage sees one bottle - so the formula comes out of
+      # the merge job below. The build type input does not reach this line: the
+      # formula pins Release itself, exactly as the Alpine line's recipe does.
+      - name: This runner's bottle tag
+        id: tag
+        # Homebrew is the authority on what a bottle built here is called, so
+        # the answer is asked of it rather than derived from `uname` and
+        # `sw_vers` here - the same place `brew bottle` reads it from, which is
+        # why `Utils::Bottles.tag` and not a table of codenames. `2>/dev/null`
+        # because a dev command writes its own notices to stderr and this reads
+        # stdout.
+        run: |
+          tag=$(brew ruby -e 'require "utils/bottles"; print Utils::Bottles.tag' 2>/dev/null)
+          test -n "$tag" || {
+            echo "::error::Homebrew named no bottle tag for this machine ($(uname -m), macOS $(sw_vers -productVersion))"
+            exit 1
+          }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "this runner bottles as $tag ($(uname -m), macOS $(sw_vers -productVersion))"
+
       - name: Pack
+        env:
+          MACOS_TAG: ${{ steps.tag.outputs.tag }}
         run: ci/pack-${{ matrix.dist.kind }}.sh
 
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          name: packages-${{ matrix.dist.name }}
+          # Named after this row's own tag, not the line's name: the merge job
+          # collects every row of the line by pattern, exactly as the release
+          # workflow does, so the row's name has to say which row it is.
+          name: packages-${{ matrix.dist.name }}-row
+          path: out
+          if-no-files-found: error
+
+  # The one job that can see every row of this line at once, and the only writer
+  # of the formula's bottle block. On this line there is one row, so the block
+  # it assembles carries one checksum - the shape is the release line's, run
+  # small. What it still asserts here is worth the job: that the row's pin is
+  # the recipe the tap ships apart from the pin, that the block's root_url is the
+  # address stage B will serve from, that the block's checksum is the JSON's own,
+  # and that a missing row is a named refusal rather than a block with a line
+  # fewer in it.
+  merge-brew:
+    name: "A merge (brew)"
+    needs: [pack-brew]
+    # `always()`, for the reason the release workflow gives: a row that failed
+    # should be reported as a missing row by this job's own count rather than by
+    # this job never running.
+    if: always() && !cancelled()
+    runs-on: macos-latest
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Download the rows
+        uses: actions/download-artifact@v8
+        with:
+          pattern: packages-brew-row*
+          path: rows
+
+      # The same reading the pack row takes, on the machine that is about to
+      # declare it: the row's tag travels in its manifest and this job has to say
+      # what it expects before it can notice that they disagree. Both jobs are
+      # `macos-latest`, so the two answers are the same machine's.
+      - name: This runner's bottle tag
+        id: tag
+        run: |
+          tag=$(brew ruby -e 'require "utils/bottles"; print Utils::Bottles.tag' 2>/dev/null)
+          test -n "$tag" || {
+            echo "::error::Homebrew named no bottle tag for this machine ($(uname -m), macOS $(sw_vers -productVersion))"
+            exit 1
+          }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "this runner bottles as $tag ($(uname -m), macOS $(sw_vers -productVersion))"
+
+      - name: Assemble the formula's block from every row
+        env:
+          MACOS_TAGS: ${{ steps.tag.outputs.tag }}
+        run: ci/merge-brew.sh out rows/*
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          # The name stages B and C download, unchanged from when stage A wrote
+          # it directly: what travels on is the same thing, one stage later.
+          name: packages-brew
           path: out
           if-no-files-found: error
 
@@ -556,7 +649,12 @@ jobs:
     # matrix carries every line and GitHub has no way to say "this row depends on
     # that row", so those jobs are allowed to run and a row fails on its missing
     # artifact instead. Here the producing job *is* a job.
-    needs: pack-brew
+    #
+    # The artifact it waits for is the merge job's rather than stage A's, because
+    # the formula it installs has to carry the block - and that is written by
+    # ci/merge-brew.sh. The name is unchanged, so what arrives under `pkgs/` is
+    # the same layout it always was, one stage later.
+    needs: [merge-brew]
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -583,16 +681,38 @@ jobs:
       - name: Install coreutils (for gtimeout)
         run: brew install coreutils
 
+      # This row's own tag, read the same way the merge job read it. Both are
+      # `macos-latest`, so the answer describes the machine about to pour - and
+      # ci/runtime-brew.sh refuses a row whose declared tag is not in the block
+      # rather than pouring whatever the block happens to list first.
+      - name: This runner's bottle tag
+        id: tag
+        run: |
+          tag=$(brew ruby -e 'require "utils/bottles"; print Utils::Bottles.tag' 2>/dev/null)
+          test -n "$tag" || {
+            echo "::error::Homebrew named no bottle tag for this machine ($(uname -m), macOS $(sw_vers -productVersion))"
+            exit 1
+          }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "this runner bottles as $tag ($(uname -m), macOS $(sw_vers -productVersion))"
+
       # ci/runtime-brew.sh: prove the runner really has no Qt, tap and trust,
       # put stage A's formula into the tap, serve the bottle on loopback, pour it
       # - and insist that it was poured rather than built from source, which is
       # the reading that says the bottle block and the bottle agree.
+      #
+      # It reads this row's bottle out of the manifest by tag rather than taking
+      # the first file in the directory, and insists that the file Homebrew
+      # poured is the one its own tag names: with one row there is nothing else
+      # it could be, and the release line is where that reading earns its keep.
       #
       # It ends with the recipe's own `test do` block, run through `brew test`,
       # which is the only thing that executes it: an install does not. The same
       # command follows against a copy of that block whose program is not
       # installed, so the step's reading is one that can go red.
       - name: Pour the bottle
+        env:
+          MACOS_TAG: ${{ steps.tag.outputs.tag }}
         run: ci/runtime-${{ matrix.dist.kind }}.sh
 
       # The platform question, which is one script per platform rather than per
@@ -680,7 +800,7 @@ jobs:
 
   verify-dev-brew:
     name: "C dev (${{ matrix.dist.name }})"
-    needs: pack-brew
+    needs: [merge-brew]
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -703,6 +823,22 @@ jobs:
       - name: Install coreutils (for gtimeout)
         run: brew install coreutils
 
+      # The same tag reading as stage B, for the same reason: this row asserts
+      # that the block carries its tag and that the bottle Homebrew poured is the
+      # one that tag names, so a row that landed on another macOS fails here
+      # rather than building the consumer against a bottle for a machine nobody
+      # asked about.
+      - name: This runner's bottle tag
+        id: tag
+        run: |
+          tag=$(brew ruby -e 'require "utils/bottles"; print Utils::Bottles.tag' 2>/dev/null)
+          test -n "$tag" || {
+            echo "::error::Homebrew named no bottle tag for this machine ($(uname -m), macOS $(sw_vers -productVersion))"
+            exit 1
+          }
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "this runner bottles as $tag ($(uname -m), macOS $(sw_vers -productVersion))"
+
       # ci/dev-brew.sh: the same pour as stage B, on a machine of its own, plus
       # the QMdmm sources the consumer project builds. There is no separate dev
       # package to install: one formula carries the runtime, the headers and the
@@ -710,6 +846,8 @@ jobs:
       # resolve" but "is the one package enough to build against" - the same
       # narrowing Arch's line makes.
       - name: Install the formula
+        env:
+          MACOS_TAG: ${{ steps.tag.outputs.tag }}
         run: ci/dev-${{ matrix.dist.kind }}.sh
 
       # Qt's Linguist tools, installed for this stage rather than declared by

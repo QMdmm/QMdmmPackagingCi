@@ -3,7 +3,10 @@
 The publishing half of this repository: the stages that turn a packaging run
 into a **signed, published** repository. `ci/` is the daily verification half and
 is untouched by any of this — a release reuses `ci/pack-*.sh`, `ci/runtime-*.sh`
-and `ci/dev-*.sh` exactly as the daily run does, and adds the stages below.
+and `ci/dev-*.sh` exactly as the daily run does, and adds the stages below. The
+one stage this change added to `ci/` is `ci/merge-brew.sh`, which the daily run
+runs as well: a release reuses it for the same reason it reuses the other three,
+and the release is not the only place it is exercised.
 
 ## Where this came from
 
@@ -28,7 +31,7 @@ called differently (its repository was `lab`, so its package database was
 | `sign-repo-<fmt>.sh` | S sign | CI, in the row's own image | **that line's subkey** |
 | `mkrepo-debian.sh` | (helper for S/deb) | CI | the key it is handed |
 | `check-fingerprints.sh` | gate in the publish job | CI | nothing |
-| `publish-brew.sh` | publish: stage the bottle, write its address into the formula | CI, publish job | nothing |
+| `publish-brew.sh` | publish: stage the bottles, write their address into the formula | CI, publish job | nothing |
 | `publish-macos.sh` | publish: attach the `.dmg` to the product repository's release | CI, publish job | **a token for the product repository** |
 | `publish-tap.sh` | publish: put this release's formula into the Homebrew tap | CI, publish job | **the same token** |
 | `consume-<consumer>.sh` | trust: install and verify as a consumer | CI, clean container | nothing |
@@ -51,22 +54,53 @@ anything: a bottle is verified by the checksum in the formula that points at it
 and the `.dmg` by the ad-hoc signature `macdeployqt` applies, and neither has a
 subkey to sign with.
 
+The Homebrew line is **three rows per stage** - `macos-15`, `macos-26` and
+`xcode-27`, i.e. macOS 15 Sequoia, 26 Tahoe and 27 - where the `.dmg` line is
+one, and that is the product rather than the platform. A `.dmg` is one
+self-contained bundle; a bottle is a binary built on one exact macOS version,
+and the tag it is published under is the compatibility floor: a macOS older than
+the runner cannot pour it, and a macOS newer than every tag pours the newest
+line below it. One row therefore answers "does the bottle work" for exactly one
+macOS, and `ci/pack-brew.sh` refuses a row whose runner is not the macOS it
+declares because nothing downstream could tell.
+
+No single row can write the formula's bottle block, which has one checksum per
+version: the row that bottled on 15 knows nothing about the other two. So the
+rows each produce a bottle plus the JSON describing it, and **`merge-brew`** -
+one job, after all of them - turns those JSONs into the block with Homebrew's own
+`brew bottle --merge` and refuses to merge if the rows are not the set the
+workflow declared, if all three did not pin the same source, or if the block's
+tags or order are not the ones expected. That order is behaviour rather than
+formatting (Homebrew walks the block in file order when it looks for a bottle for
+a macOS newer than every tag), so it is read back rather than assumed. The merge
+job runs on an arm64 macOS runner because the JSONs name their formula through
+Homebrew's repository layout.
+
+`merge-brew`'s output is the artifact the stages after it consume, under the name
+`pack-brew` - one directory holding every bottle this run built, the formula
+carrying the block, and a manifest naming each bottle. Every stage from there on
+reads this row's bottle **out of that manifest by tag** rather than taking the
+first file in the directory, and B and C assert that the file Homebrew poured is
+the one their own tag names: pouring a neighbouring row's bottle is the one
+failure that would otherwise be green twice over.
+
 They also publish to three different places, and the last two are why this
 directory holds a credential at all:
 
-* **the bottle goes to the site**, beside the twelve package lines and under the
+* **the bottles go to the site**, beside the twelve package lines and under the
   same `GITHUB_TOKEN` the rest of the publish job uses, because that address is
-  the repository the whole publication lives in. `publish-brew.sh` stages it and
-  writes the address into the formula in one step, so the URL and the file it
-  names cannot come from two different opinions. The formula a tap should carry
-  is published beside the bottle as `brew/qmdmm.rb`.
+  the repository the whole publication lives in. `publish-brew.sh` stages every
+  bottle the manifest names and writes the address into the formula in one step,
+  so the URL and the files it names cannot come from two different opinions. The
+  formula a tap should carry is published beside them as `brew/qmdmm.rb`.
 * **that formula goes into the tap**, because a bottle no formula points at has
   not been published: the address a user's `brew install` reads is the one in
   `QMdmm/homebrew-qmdmm`. `publish-tap.sh` fetches the formula back off the site
   rather than taking the artifact the publish job staged, so what reaches the tap
-  is the bytes a user can get; and it may rewrite only the pin and the bottle
-  block, because the recipe itself is hand-written and not this workflow's to
-  edit.
+  is the bytes a user can get; it fetches and hashes **every** bottle the block
+  names before writing anything, because a pour is per machine; and it may
+  rewrite only the pin and the bottle block, because the recipe itself is
+  hand-written and not this workflow's to edit.
 * **the `.dmg` goes to the product repository's release**, because it is not an
   input to a recipe - it is the product, and the page a person downloads it from
   is the product's own.

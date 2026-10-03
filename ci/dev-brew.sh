@@ -33,10 +33,28 @@ tap_dir=$(brew --repo "$HOMEBREW_TAP")
 test -f pkgs/qmdmm.rb
 install -m 644 pkgs/qmdmm.rb "$tap_dir/Formula/qmdmm.rb"
 
+# The same premise stage B asserts, and for the same reason: the tag is the
+# compatibility floor, so a row that is not the macOS it names would pour a
+# neighbouring row's bottle, build the consumer against it, and report success
+# about a machine it was not asked about. See ci/runtime-brew.sh for the long
+# version of why the block's tag and the poured file's name both have to be
+# read.
+: "${MACOS_TAG:?this row must declare the bottle tag of its runner, e.g. arm64_sequoia}"
+if ! grep -qE "^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, $MACOS_TAG:" "$tap_dir/Formula/qmdmm.rb"; then
+  echo "::error::the block has no line for $MACOS_TAG, which is the tag this row declares. This runner is macOS $(sw_vers -productVersion) $(uname -m). The block as it stands:"
+  sed -n '/^  bottle do/,/^  end/p' "$tap_dir/Formula/qmdmm.rb"
+  exit 1
+fi
+
 mkdir -p serve
 cp pkgs/bottles/*.bottle.tar.gz serve/
 serve_dir=$PWD/serve
-bottle_file=$(basename "$(ls pkgs/bottles/*.bottle.tar.gz | head -1)")
+bottle_file=$(awk -F'\t' -v t="$MACOS_TAG" 'NR > 1 && $1 == "qmdmm" && $3 == t { print $4; exit }' pkgs/MANIFEST.tsv)
+if [ -z "$bottle_file" ] || [ ! -f "serve/$bottle_file" ]; then
+  echo "::error::$MACOS_TAG has no bottle in this run's set, or the file the manifest names is not there: '$bottle_file'. The manifest:"
+  cat pkgs/MANIFEST.tsv
+  exit 1
+fi
 port=${BOTTLE_ROOT_URL##*:}
 if command -v python3 >/dev/null; then
   python3 -m http.server "$port" --directory "$serve_dir" >/tmp/httpd.log 2>&1 &
@@ -63,6 +81,11 @@ if grep -qE 'Building qmdmm from source' "$pour_log"; then
 fi
 if ! grep -qE 'Pouring qmdmm-' "$pour_log"; then
   echo "::error::no pour of qmdmm appears in the install log, so the bottle was not what got installed"
+  exit 1
+fi
+if ! grep -qF "Pouring $bottle_file" "$pour_log"; then
+  echo "::error::$bottle_file was not the file poured, so this row built against another macOS's bottle. This row is $MACOS_TAG. What was poured:"
+  grep -E 'Pouring ' "$pour_log" || true
   exit 1
 fi
 

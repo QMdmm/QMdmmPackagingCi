@@ -42,12 +42,26 @@ brew tap "$HOMEBREW_TAP"
 brew trust --tap "$HOMEBREW_TAP"
 tap_dir=$(brew --repo "$HOMEBREW_TAP")
 
-# Stage A's formula rather than the repository's: it is the one carrying the
-# bottle block with this run's checksum, and the block's root_url is the loopback
-# address served two steps below.
+# The merged formula rather than the tap's own: it is the one carrying the block
+# with every row's checksum in it - assembled from all of this run's bottles by
+# ci/merge-brew.sh - and the block's root_url is the loopback address served two
+# steps below.
 test -f pkgs/qmdmm.rb
 install -m 644 pkgs/qmdmm.rb "$tap_dir/Formula/qmdmm.rb"
 grep -A6 '^  bottle do' "$tap_dir/Formula/qmdmm.rb"
+
+# The row's own tag, declared by the workflow's matrix and checkable here. The
+# tag is the compatibility floor, so a row that landed on a macOS other than the
+# one it claims would be handed a neighbouring row's bottle - and would pour it,
+# and pass, and verify a build nobody on the row's own macOS can install. The
+# two readings below are what make the row's identity a fact: the block has to
+# carry this tag, and the pour has to have fetched *this* tag's file.
+: "${MACOS_TAG:?this row must declare the bottle tag of its runner, e.g. arm64_sequoia}"
+if ! grep -qE "^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, $MACOS_TAG:" "$tap_dir/Formula/qmdmm.rb"; then
+  echo "::error::the block has no line for $MACOS_TAG, which is the tag this row declares. This runner is macOS $(sw_vers -productVersion) $(uname -m), and a block that names no tag for it pours nothing here - the install would build from source, and the assertion below would report that as a missing bottle rather than as the row's mistake. The block as it stands:"
+  sed -n '/^  bottle do/,/^  end/p' "$tap_dir/Formula/qmdmm.rb"
+  exit 1
+fi
 
 # The root_url is a convention between the stages and nothing more: stage A
 # cannot reach the machine that will pour the bottle, and a published URL is not
@@ -57,7 +71,21 @@ grep -A6 '^  bottle do' "$tap_dir/Formula/qmdmm.rb"
 mkdir -p serve
 cp pkgs/bottles/*.bottle.tar.gz serve/
 serve_dir=$PWD/serve
-bottle_file=$(basename "$(ls pkgs/bottles/*.bottle.tar.gz | head -1)")
+# This row's own bottle, read out of the manifest rather than taken as the first
+# file in the directory. Three bottles are served here now, and `head -1` would
+# probe and then assert about whichever one sorted first - so a row that fetched
+# the wrong macOS's bottle would be green twice over.
+bottle_file=$(awk -F'\t' -v t="$MACOS_TAG" 'NR > 1 && $1 == "qmdmm" && $3 == t { print $4; exit }' pkgs/MANIFEST.tsv)
+if [ -z "$bottle_file" ]; then
+  echo "::error::$MACOS_TAG has no row in pkgs/MANIFEST.tsv, so this row cannot say which bottle it is here to pour:"
+  cat pkgs/MANIFEST.tsv
+  exit 1
+fi
+if [ ! -f "serve/$bottle_file" ]; then
+  echo "::error::serve/$bottle_file is missing, and the manifest names it for $MACOS_TAG. serve/ holds:"; ls -l serve
+  exit 1
+fi
+echo "this row pours $bottle_file"
 
 case "$BOTTLE_ROOT_URL" in
   http://127.0.0.1:* | http://localhost:*) ;;
@@ -106,7 +134,16 @@ if ! grep -qE 'Pouring qmdmm-' "$pour_log"; then
   echo "::error::no pour of qmdmm appears in the install log, so the bottle was not what got installed"
   exit 1
 fi
-echo "poured from the bottle, not built from source"
+# ... and the file it poured is the one this row exists to verify. A pour of
+# another row's bottle is the failure this stage would otherwise report as a
+# success: the bottle being poured is the right *formula*, and only the name says
+# which macOS it was built on.
+if ! grep -qF "Pouring $bottle_file" "$pour_log"; then
+  echo "::error::$bottle_file was not the file poured, so this row verified another macOS's bottle. This row is $MACOS_TAG. What was poured:"
+  grep -E 'Pouring ' "$pour_log" || true
+  exit 1
+fi
+echo "poured from the bottle, not built from source, and it was this row's: $bottle_file"
 
 # The other half of "the declared dependencies are complete", stated as a
 # reading: the formula declares three Qt sub-modules, and pouring it has to be

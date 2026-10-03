@@ -1,10 +1,17 @@
 #!/usr/bin/env bash
 #
-# Stage A for the Homebrew line, in one file: tap the repository that holds the
-# formula, re-derive its source pin for the ref this run was given, install it
-# from source with --build-bottle, bottle it, write the bottle block back into
-# the tap's own copy of the formula, and collect the two things the later
-# stages need - the bottle and that formula.
+# Stage A for the Homebrew line, one row per macOS: tap the repository that
+# holds the formula, re-derive its source pin for the ref this run was given,
+# install it from source with --build-bottle, and bottle it.
+#
+# What a row produces is one bottle, the JSON that describes it (which is what
+# the merge stage consumes and nothing else does), the pinned formula, and a
+# manifest naming this row's own tag. It deliberately writes NO bottle block:
+# a block carries one checksum per macOS version and the formula a user gets
+# carries all of them, so the block is assembled once, from every row's JSON,
+# by ci/merge-brew.sh. A row that merged its own would be writing a formula
+# whose block says "this bottle, on this macOS" - which is the one thing a
+# single row knows and the one thing the published recipe must not say.
 #
 # There is no `base-image-brew.sh` behind this: the macOS runner image already
 # has Homebrew, git, cmake and ninja, and Qt is *not* in it (the toolset's
@@ -15,12 +22,38 @@
 # purpose: this stage must verify the recipe a user gets, and a second copy
 # would be a copy that could drift. Everything below therefore works on the
 # tap's own checkout of it.
+#
+# env: MACOS_TAG - the bottle tag this row's runner is expected to produce,
+#                  e.g. arm64_sequoia. Declared by the workflow's matrix and
+#                  asserted below against Homebrew's own answer.
 set -euxo pipefail
 
 # `brew bottle` is a developer command, and Homebrew turns developer mode on by
 # itself the first time one is called - once, with a warning, in the middle of
-# this stage's log. Asking for it up front keeps that out of the way.
+# this stage's log. Asking for it up front keeps that out of the way. It is also
+# what keeps the warning out of the tag reading below, which parses stdout.
 brew developer on
+
+# The row's premise, as a reading rather than as a label. A bottle's tag is the
+# *producing* machine's macOS version and it is the compatibility floor - a
+# macOS older than the runner cannot pour the bottle - so a row whose runner is
+# not the macOS it claims would publish a bottle labelled for a system it was
+# not built on, and every later stage would agree with the label, because every
+# later stage reads the tag out of the block this run writes. Nothing downstream
+# can catch that; this can.
+#
+# The comparison is against Homebrew's own `Utils::Bottles.tag`, not against a
+# table of codenames kept here: the question is "what would `brew bottle` name
+# this machine's bottle", so the answer has to come from the same place the name
+# does. `2>/dev/null` because a dev command writes its own notices to stderr and
+# this reads stdout.
+: "${MACOS_TAG:?this row must declare the bottle tag of its runner, e.g. arm64_sequoia}"
+system_tag=$(brew ruby -e 'require "utils/bottles"; print Utils::Bottles.tag' 2>/dev/null)
+if [ "$system_tag" != "$MACOS_TAG" ]; then
+  echo "::error::this row declares $MACOS_TAG, but Homebrew names this machine's bottle $system_tag ($(uname -m), macOS $(sw_vers -productVersion)). A bottle tagged for a macOS it was not built on is the one thing no later stage can detect: they all read the tag from the bottle itself."
+  exit 1
+fi
+echo "this row's tag: $MACOS_TAG, which is what Homebrew computes for $(sw_vers -productVersion) here"
 
 # Cloned rather than faked. The local verification could write a formula
 # straight into Library/Taps (an installed tap is only a directory,
@@ -156,21 +189,10 @@ brew install --build-bottle "$HOMEBREW_TAP/qmdmm"
 # The log says which way it went: with the flag, the
 # `Determining … bottle rebuild...` line never appears. (This machine cannot
 # re-run it locally to prove that - `/opt/homebrew` belongs to another account -
-# so the run log is where the reading comes from, and the guard below turns the
+# so the run log is where the reading comes from, and the guards below turn the
 # opposite outcome into a named failure rather than a strange filename.)
 brew bottle --json --no-rebuild --root-url "$BOTTLE_ROOT_URL" "$HOMEBREW_TAP/qmdmm"
 ls -l ./*.bottle.*
-
-# Writing the block back into the tap's copy is what makes the *tap's* file the
-# one carrying real checksums. --no-commit because the tap's git state is not
-# this stage's business: the authenticated copy of the formula travels on as an
-# artifact instead.
-brew bottle --merge --write --no-commit ./*.bottle.json
-
-if ! grep -q '^  bottle do' "$formula"; then
-  echo "::error::the bottle block was not written into the tap's formula"
-  exit 1
-fi
 
 mkdir -p out/bottles
 # Matched by the widest shape `brew bottle` can write - `…bottle.tar.gz` and
@@ -183,11 +205,11 @@ mkdir -p out/bottles
 # script takes no arguments.)
 set -- ./[!_]*.bottle*.tar.gz
 if [ ! -e "$1" ]; then
-  echo "::error::brew bottle wrote no bottle archive in $(pwd). The .json is there, so the block did reach the formula; what is missing is the file every later stage pours."
+  echo "::error::brew bottle wrote no bottle archive in $(pwd). The .json is there, so the pin and the build both happened; what is missing is the file every later stage pours."
   exit 1
 fi
 if [ "$#" -ne 1 ]; then
-  echo "::error::expected one bottle for a single-arch build, found $#: $*"
+  echo "::error::expected one bottle from this row, found $#: $*"
   exit 1
 fi
 case "$1" in
@@ -202,60 +224,87 @@ esac
 # read as "no bottle for this tag" rather than as a typo.
 poured=${1#./}
 poured=${poured/--/-}
-cp "$1" "out/bottles/$poured"
-cp "$formula" out/qmdmm.rb
 
-# Read back out of the bottle block rather than assumed: the tag is the
-# producing runner's macOS version, which is the compatibility floor, and it is
-# the one field here that must not be guessed at. `-E`, because the alternation
-# a BRE would need (`\|`) is a GNU extension this platform's sed does not have.
-#
-# Mind the indentation: `bottle do` sits at two spaces but `root_url` / `sha256`
-# are one level further in, so anchoring on the block's own indentation matches
-# nothing - and an empty read is indistinguishable from "the block has no tag",
-# which is what the first dispatched run reported while the tag sat right there.
-tags=$(sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, (arm64_[a-z0-9_]*|x86_64_[a-z0-9_]*|all):.*/\1/p' out/qmdmm.rb)
-echo "bottle tags written into the formula: $tags"
-case "$tags" in
-  arm64_*) ;;
+# The row's tag has to be in the *name*, because that name is the URL Homebrew
+# builds and the tag is why this row exists at all. Checked before anything is
+# collected: a bottle whose name does not carry the row's tag is a bottle that
+# belongs to another row, and the merge stage would find its set incomplete.
+case "$poured" in
+  "qmdmm-$version.$MACOS_TAG.bottle.tar.gz") ;;
   *)
-    echo "::error::no usable bottle tag in the formula's bottle block; this runner is $(uname -m) on $(sw_vers -productVersion). The block as written:"
-    sed -n '/bottle do/,/end/p' out/qmdmm.rb
+    echo "::error::this row declares $MACOS_TAG but produced '$poured', which is not qmdmm-$version.$MACOS_TAG.bottle.tar.gz. A bottle is fetched by the name its tag makes, so a row that produced another row's name is a row whose bottle nobody would fetch."
     exit 1
     ;;
 esac
-if [ "$(printf '%s\n' "$tags" | grep -c .)" -ne 1 ]; then
-  echo "::error::expected exactly one bottle tag for a single-arch build, got: $tags"
+
+# The JSON is what the merge stage reads, and the block it writes comes out of
+# it rather than out of the .tar.gz, so the two have to be about the same bytes.
+# Homebrew wrote both in one command and this is the reading that says so: the
+# checksum in the JSON is compared against the checksum of the file beside it.
+#
+# Found by a glob rather than by name, because the two names differ: the JSON
+# sits beside the file Homebrew wrote, which spells the name with two hyphens
+# where the URL spells it with one. Composing the JSON's name from the poured
+# name would look for a file that is not there and report a brew bug.
+# The count is taken over names that exist, not over the array: an unmatched
+# glob stays literal, so `(./[!_]*.bottle*.json)` has length 1 when there is no
+# JSON at all - the pattern itself - and a length test would pass. The stage
+# would then reach python3 with a path that is not there and die on its
+# traceback, which says nothing about which file is missing, and the count in
+# the message would read 1 when the answer is 0.
+n_json=$(ls -1 ./*.bottle*.json 2>/dev/null | grep -c . || true)
+if [ "$n_json" -ne 1 ]; then
+  echo "::error::expected one bottle JSON beside the bottle, found $n_json. The merge stage reads this file and nothing else for this row's checksum. What is here: $(ls -A . | tr '\n' ' ')"
+  exit 1
+fi
+json=$(ls -1 ./*.bottle*.json)
+json_sha=$(python3 -c '
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+for formula in d.values():
+    for tag, t in (formula.get("bottle") or {}).get("tags", {}).items():
+        print(tag, t["sha256"])
+' "$json")
+if [ "$json_sha" != "$MACOS_TAG $(shasum -a 256 "$1" | awk '{print $1}')" ]; then
+  echo "::error::the JSON and the bottle disagree about what was built. JSON says '$json_sha'; the file hashes to '$MACOS_TAG $(shasum -a 256 "$1" | awk '{print $1}')'. The merge stage writes the block from the JSON, so a block built from these two would name a checksum no download could match."
   exit 1
 fi
 
-printf 'package\tversion\tfile\n' > out/MANIFEST.tsv
-for f in out/bottles/*.bottle.tar.gz; do
-  printf 'qmdmm\t%s\t%s\n' "$version" "$(basename "$f")" >> out/MANIFEST.tsv
-done
-# A header with no row under it is a manifest every later stage reads as "this
-# run built nothing", and `publish-brew.sh` would go looking for a file that was
-# never named. Both are silent; this is not.
+cp "$1" "out/bottles/$poured"
+cp "$json" "out/bottles/${poured%.tar.gz}.json"
+# The pinned formula travels with the row - not for its block, which is the
+# merge stage's to write, but as the reading that all rows pinned the same
+# source. merge-brew.sh compares the three byte for byte; three rows that
+# disagree about the url, the sha256 or the version would be three bottles of
+# three different things wearing one version number.
+cp "$formula" out/qmdmm.pinned.rb
+
+printf 'package\tversion\ttag\tfile\n' > out/MANIFEST.tsv
+printf 'qmdmm\t%s\t%s\t%s\n' "$version" "$MACOS_TAG" "$poured" >> out/MANIFEST.tsv
+# A header with no row under it is a manifest the merge stage reads as "this row
+# built nothing", and it would then be merged as a two-row block. Both are
+# silent; this is not.
 if [ "$(awk 'NR > 1 { n++ } END { print n + 0 }' out/MANIFEST.tsv)" -ne 1 ]; then
-  echo "::error::the manifest lists no bottle. out/bottles holds: $(ls -A out/bottles 2>&1)"
+  echo "::error::the manifest lists no bottle for this row. out/bottles holds: $(ls -A out/bottles 2>&1)"
   exit 1
 fi
 
 {
-  echo '### The bottle produced'
+  echo "### The bottle this row produced"
   echo
   echo '```'
   cat out/MANIFEST.tsv
   echo '```'
   echo
-  echo "Tag \`$tags\` is the runner's own macOS version, which is the"
-  echo 'compatibility floor: a macOS older than this one cannot pour it. That'
-  echo 'is why a bottle line needs one runner per supported macOS, and why the'
-  echo 'producing runner and the consuming runner have to be the same OS.'
+  echo "Tag \`$MACOS_TAG\` is this runner's own macOS version, which is the"
+  echo 'compatibility floor: a macOS older than this one cannot pour it, and a'
+  echo 'newer one pours it only because the block lists it as the newest'
+  echo 'compatible below that system. That is why the workflow runs one row per'
+  echo 'supported macOS, and why the block the merge stage assembles has to'
+  echo 'carry every row.'
   echo
-  echo 'The formula as it will be poured, i.e. with the block written back:'
-  echo
-  echo '```ruby'
-  sed -n '/^  bottle do/,/^  end/p' out/qmdmm.rb
-  echo '```'
+  echo 'This row writes no block of its own; the formula it carries still has'
+  echo 'whatever the tap ships, and merge-brew.sh replaces it with one that'
+  echo 'lists every row of this run.'
 } >> "$GITHUB_STEP_SUMMARY"

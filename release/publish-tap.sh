@@ -8,12 +8,13 @@
 # two that can disagree - which is the same reason stage A taps the repository
 # instead of keeping a formula of its own.
 #
-# Before anything is written, the bottle that formula names is downloaded and
-# hashed against the checksum in its own bottle block. That is the check a pour
-# performs, and it is the one that has to hold before a tap may point at an
-# address: a formula whose bottle is missing or different does not fail - it
-# falls back to building from source, with a warning, and every stage of this
-# workflow would already have been green.
+# Before anything is written, EVERY bottle that formula names is downloaded and
+# hashed against the checksum in its own bottle block. One bottle per macOS
+# version, and the check is per bottle: a pour is per machine, so a block whose
+# macOS 15 line pointed at a bottle that was not there would build from source
+# for macOS 15 users alone, with a warning, while every stage of this workflow
+# was green for everybody else. That is the failure the whole line exists to
+# catch, and one bottle is no longer enough to catch it.
 #
 # Why this is a job of its own, with a credential: the tap is a different
 # repository, and no token a workflow is issued can write outside the one it
@@ -77,20 +78,28 @@ grep -qE "^[[:space:]]*root_url \"$PAGES/brew\"\$" "$W/qmdmm.rb" || {
   echo "::error::the published formula's root_url is not $PAGES/brew, so its bottle lives somewhere this workflow did not choose:"
   grep -E '^[[:space:]]*root_url' "$W/qmdmm.rb"; exit 1; }
 
-# The tag and the checksum, read off the block rather than assumed. One line is
-# the assertion: `brew bottle` writes one per architecture it built for, and a
-# run that produced two tags is a build that is not the single-arch one this
-# line bottles.
+# The tags and their checksums, read off the block rather than assumed. One line
+# per macOS version this release bottled, and the reading is that every
+# `sha256 cellar:` line in the block yielded a pair: a line this stage could not
+# parse is a line whose bottle would never be verified, and skipping it quietly
+# is exactly how one macOS version stops being served without anyone noticing.
 block=$(sed -n '/^[[:space:]]*bottle do/,/^[[:space:]]*end/p' "$W/qmdmm.rb")
-read -r tag hash <<<"$(printf '%s\n' "$block" \
-  | sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, (arm64_[a-z0-9_]*|x86_64_[a-z0-9_]*|all): "([0-9a-f]{64})".*/\1 \2/p' \
-  | head -1)"
-if [ -z "${tag:-}" ] || [ -z "${hash:-}" ]; then
-  echo "::error::no usable bottle line in the published formula's block:"; printf '%s\n' "$block"; exit 1
+[ -n "$block" ] || { echo "::error::the published formula has no bottle block:"; cat "$W/qmdmm.rb"; exit 1; }
+pairs=$(printf '%s\n' "$block" \
+  | sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, ([a-z0-9_]+): "([0-9a-f]{64})".*/\1 \2/p')
+count=$(printf '%s\n' "$pairs" | grep -c . || true)
+n_lines=$(printf '%s\n' "$block" | grep -cE '^[[:space:]]*sha256[[:space:]]+cellar:' || true)
+if [ "$n_lines" -lt 1 ]; then
+  echo "::error::no bottle line in the published formula's block:"; printf '%s\n' "$block"; exit 1
 fi
-count=$(printf '%s\n' "$block" | sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, (arm64_[a-z0-9_]*|x86_64_[a-z0-9_]*|all):.*/\1/p' | grep -c . || true)
-[ "$count" = 1 ] || { echo "::error::the block carries $count bottle tags, expected 1:"; printf '%s\n' "$block"; exit 1; }
-echo "bottle tag: $tag   checksum: $hash"
+if [ "$count" != "$n_lines" ]; then
+  echo "::error::the block has $n_lines sha256 cellar line(s) but only $count of them could be read as tag/checksum. The ones this stage cannot read are bottles nobody would verify:"
+  printf '%s\n' "$block"; exit 1
+fi
+if [ "$(printf '%s\n' "$pairs" | awk '{print $1}' | sort -u | grep -c .)" != "$count" ]; then
+  echo "::error::the block names the same bottle tag twice:"; printf '%s\n' "$pairs"; exit 1
+fi
+echo "bottle tags in the published formula: $(printf '%s' "$pairs" | awk '{printf "%s ", $1}')"
 
 # The source pin has to be this release's tag. The tap's whole claim is that the
 # recipe a user gets builds the thing this release is, and a formula that pinned
@@ -99,26 +108,32 @@ grep -qE "^[[:space:]]*url \"[^\"]*/archive/refs/tags/$QMDMM_REF\.tar\.gz\"\$" "
   echo "::error::the published formula does not pin $QMDMM_REF:"
   grep -E '^[[:space:]]*url ' "$W/qmdmm.rb"; exit 1; }
 
-# --- the bottle that formula names ---------------------------------------
+# --- the bottles that formula names --------------------------------------
 # The name is what Homebrew builds the URL out of: name-version.tag.bottle.tar.gz,
 # where the version is the one it parses out of the url - which strips a leading
-# `v`. Getting this wrong is a 404 at pour time rather than here, so the file is
-# fetched and hashed rather than assumed to be there.
+# `v`. Getting this wrong is a 404 at pour time rather than here, so every file
+# is fetched and hashed rather than assumed to be there.
 version="${QMDMM_REF#v}"
-bottle="qmdmm-$version.$tag.bottle.tar.gz"
-BOTTLE_URL="$PAGES/brew/$bottle"
-if ! curl -fsSL --max-time 300 \
-        -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
-        "$BOTTLE_URL?cb=${RANDOM}${RANDOM}" -o "$W/$bottle"; then
-  echo "::error::$BOTTLE_URL cannot be fetched, so the formula being published names a bottle that is not there. A pour of it would fall back to building from source and say so only in a warning."
-  exit 1
-fi
-got=$(shasum -a 256 "$W/$bottle" | awk '{print $1}')
-if [ "$got" != "$hash" ]; then
-  echo "::error::the bottle at $BOTTLE_URL hashes to $got, and the formula's block says $hash. A pour would reject it (or fall back to a source build); the two were not produced together."
-  exit 1
-fi
-echo "verified: $bottle  $got  ($(wc -c < "$W/$bottle" | tr -d ' ') bytes) matches the block"
+verified=0
+while read -r tag hash; do
+  [ -n "$tag" ] || continue
+  bottle="qmdmm-$version.$tag.bottle.tar.gz"
+  BOTTLE_URL="$PAGES/brew/$bottle"
+  if ! curl -fsSL --max-time 300 \
+          -H 'Cache-Control: no-cache' -H 'Pragma: no-cache' \
+          "$BOTTLE_URL?cb=${RANDOM}${RANDOM}" -o "$W/$bottle"; then
+    echo "::error::$BOTTLE_URL cannot be fetched, so the formula being published names a bottle that is not there - for $tag alone. A pour on that macOS would fall back to building from source and say so only in a warning, while every other macOS poured the bottle. Check that this tag's row of the release built one and that publish-brew.sh staged it."
+    exit 1
+  fi
+  got=$(shasum -a 256 "$W/$bottle" | awk '{print $1}')
+  if [ "$got" != "$hash" ]; then
+    echo "::error::the bottle at $BOTTLE_URL hashes to $got, and the formula's block says $hash (tag $tag). A pour on that macOS would reject it (or fall back to a source build); the two were not produced together."
+    exit 1
+  fi
+  echo "verified: $bottle  $got  ($(wc -c < "$W/$bottle" | tr -d ' ') bytes) matches the block"
+  verified=$((verified + 1))
+done < <(printf '%s\n' "$pairs")
+[ "$verified" = "$count" ] || { echo "::error::$count bottle tag(s) in the block, $verified verified"; exit 1; }
 
 # --- the tap --------------------------------------------------------------
 # Cloned rather than driven through the contents API, so that what is compared
@@ -140,7 +155,9 @@ if cmp -s "$old" "$W/qmdmm.rb"; then
     echo '### The Homebrew tap'
     echo
     echo "\`$slug\` already carries this release's formula byte for byte"
-    echo "(\`$version\`, bottle tag \`$tag\`, \`$hash\`), so it was left alone."
+    echo "(\`$version\`, bottle tag(s) \`$(printf '%s' "$pairs" | awk '{printf "%s ", $1}')\`),"
+    echo 'so it was left alone. Every bottle its block names was still fetched'
+    echo 'and hashed above, which is the part that could have gone stale.'
   } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
   exit 0
 fi
@@ -196,7 +213,7 @@ printf '%s\n' "$diff_lines" | sed -e 's/^/  /'
 cp "$W/qmdmm.rb" "$old"
 git -C "$W/tap" add Formula/qmdmm.rb
 git -C "$W/tap" -c user.name="Neve M. Nguyen" -c user.email="nemn9852@agent.qq.com" \
-    commit -q -m "qmdmm $version: bottle for $tag ($QMDMM_REF)"
+    commit -q -m "qmdmm $version: bottles for $(printf '%s' "$pairs" | awk '{printf "%s ", $1}')($QMDMM_REF)"
 # No --force and no --force-with-lease: if the tap moved under this run, that is
 # somebody else's commit and this stage must not decide to throw it away.
 git -C "$W/tap" push -q origin "HEAD:refs/heads/$branch"
@@ -218,8 +235,15 @@ echo "pushed to $slug@$branch: Formula/qmdmm.rb is now blob $got_blob"
   echo
   echo "\`$slug\` now carries this release's formula on \`$branch\` (blob"
   echo "\`$got_blob\`, read back off the remote after the push): \`$version\`,"
-  echo "bottle tag \`$tag\`, checksum \`$hash\` - the same checksum the bottle on"
-  echo "the site hashes to, which was verified before anything was written."
+  echo 'and a bottle for each of these macOS versions -'
+  echo
+  echo '```'
+  printf '%s\n' "$pairs" | awk -v v="$version" '{printf "%s  qmdmm-%s.%s.bottle.tar.gz\n", $1, v, $1}'
+  echo '```'
+  echo
+  echo 'Every one of those was fetched from the site and hashed against the'
+  echo 'checksum beside it before anything was written, so what the tap now'
+  echo 'points at is what the site is serving.'
   echo
   echo 'The change, bounded to the pin and the bottle block:'
   echo
@@ -227,6 +251,6 @@ echo "pushed to $slug@$branch: Formula/qmdmm.rb is now blob $got_blob"
   printf '%s\n' "$diff_lines"
   echo '```'
   echo
-  echo 'A user installing from this tap now pours that bottle rather than'
-  echo 'building from source.'
+  echo 'A user installing from this tap now pours a bottle for their own macOS'
+  echo 'rather than building from source.'
 } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"

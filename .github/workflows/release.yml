@@ -261,6 +261,14 @@ jobs:
   # asserts exactly that - and stage S for either, since neither face has a
   # subkey to sign with.
   #
+  # The Homebrew line is three rows per stage where the .dmg line is one, and
+  # that asymmetry is the products rather than the platform: a .dmg is one
+  # self-contained bundle that runs on any macOS it was built for, while a
+  # bottle is a binary built on one exact macOS version and is only poured on
+  # the macOS versions its tag allows. One row per supported macOS is therefore
+  # the only way the brew face answers its question, and the block that carries
+  # all three bottles is assembled afterwards by merge-brew.
+  #
   # B and C do not reuse A's machine, for the same reason the Linux rows do not
   # reuse A's container: with the toolchain still installed, a missing runtime
   # dependency would be masked by it. On this platform the fresh runner is the
@@ -270,20 +278,84 @@ jobs:
   # stage B vacuous. It is not in the image, and ci/runtime-brew.sh checks that
   # before it installs anything.
 
+  # --- the Homebrew line's rows -------------------------------------------
+  # One row per macOS version the tap serves, and the list is the same three
+  # names in each of the three matrices below: a bottle's tag is the producing
+  # machine's macOS version, so a row IS a macOS version and there is nothing
+  # to spread but that.
+  #
+  # The runners are pinned rather than floating: `macos-latest` is whatever
+  # GitHub last moved the alias to, and a row whose macOS changed under it
+  # would bottle under a new tag with nothing in the recipe saying so. The tag
+  # is asserted against Homebrew's own answer in ci/pack-brew.sh and against
+  # the block in the B and C rows, so a row that lands on the wrong macOS fails
+  # rather than publishing a bottle labelled for a system it was not built on.
+  #
+  # `xcode-27` is the macOS 27 image's label, not a typo: GitHub names that
+  # image after the Xcode generation it appeared with, it is arm64 only, and
+  # since 2026-09-16 it is based on macOS 27 rather than on 26. It is still
+  # marked preview - queueing is the one thing to expect from that row.
+  #
+  # What a row produces is ONE bottle. The block that carries all of them is
+  # assembled by merge-brew, which is a job of its own because no single row
+  # can write a block describing bottles it did not build.
   pack-brew:
-    name: "A pack (brew)"
+    name: "A pack (brew ${{ matrix.mac.tag }})"
     needs: [guard]
-    runs-on: macos-latest
+    runs-on: ${{ matrix.mac.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mac:
+          - { tag: arm64_golden_gate, runner: xcode-27, macos: "27" }
+          - { tag: arm64_tahoe,       runner: macos-26, macos: "26" }
+          - { tag: arm64_sequoia,     runner: macos-15, macos: "15" }
     steps:
       - uses: actions/checkout@v7
       # The whole stage in ci/pack-brew.sh: tap the repository that holds the
       # formula, re-derive its source pin for this run's ref, build and bottle
-      # through Homebrew's own commands, and collect the bottle plus the
-      # formula carrying its checksums. Nothing is signed and nothing is
+      # through Homebrew's own commands, and collect this row's bottle, its
+      # JSON, and the pinned formula. Nothing is signed and nothing is
       # uploaded anywhere: the bottle is an artifact of this run, and the
       # address it will be poured from is written into it by the publish stage.
       - name: Pack
+        env:
+          MACOS_TAG: ${{ matrix.mac.tag }}
         run: ci/pack-brew.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pack-brew-row-${{ matrix.mac.tag }}
+          path: out
+          if-no-files-found: error
+
+  # The one job that can see all the bottles at once. It runs on a macOS runner
+  # because `brew bottle --merge` resolves the formula through Homebrew's own
+  # repository, so it has to be a machine of the rows' shape - arm64, with the
+  # tap under the same prefix the JSONs were written against.
+  merge-brew:
+    name: "A merge (brew)"
+    needs: [pack-brew]
+    # `always()`, so that a row that failed is reported as a missing row rather
+    # than by this job never running: ci/merge-brew.sh counts the rows it was
+    # handed against the list below and names the difference.
+    if: always() && !cancelled()
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the rows
+        uses: actions/download-artifact@v8
+        with:
+          pattern: pack-brew-row-*
+          path: rows
+      - name: Merge the rows into the formula's block
+        env:
+          # The same three tags as the matrix above, and the only place the
+          # whole set is written down: this job is where "one row did not
+          # arrive" can still be a refusal instead of a block with two lines in
+          # it. Newest first, which is the order the block must list them in -
+          # a macOS newer than every tag pours the first line.
+          MACOS_TAGS: arm64_golden_gate arm64_tahoe arm64_sequoia
+        run: ci/merge-brew.sh out rows/*
       - uses: actions/upload-artifact@v7
         with:
           name: pack-brew
@@ -322,11 +394,30 @@ jobs:
   # "this row depends on that row of that matrix", so a row whose own pack
   # failed fails on its missing artifact instead of being silently skipped -
   # and a silently skipped row would take stage S with it.
+  # One row per macOS version, on that version's own runner - the same three as
+  # stage A, for a reason that is specific to this line: a bottle records the
+  # macOS it was built on and Homebrew pours the newest bottle not newer than
+  # the machine, so "the bottle works" is a statement about a macOS. A single
+  # row on `macos-latest` would pour the tahoe bottle and prove nothing about
+  # the sequoia or the golden_gate one - and the two rows that were missing
+  # would have been green by absence.
+  #
+  # Each row asserts its own tag twice over (see ci/runtime-brew.sh): the block
+  # has to carry it, and the file poured has to be named after it. A row that
+  # landed on the wrong macOS fails on both, which is the only way this can be
+  # told from a row that poured its neighbour's bottle and passed.
   verify-runtime-brew:
-    name: "B runtime (brew)"
-    needs: [pack-brew]
+    name: "B runtime (brew ${{ matrix.mac.tag }})"
+    needs: [merge-brew]
     if: always() && !cancelled()
-    runs-on: macos-latest
+    runs-on: ${{ matrix.mac.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mac:
+          - { tag: arm64_golden_gate, runner: xcode-27, macos: "27" }
+          - { tag: arm64_tahoe,       runner: macos-26, macos: "26" }
+          - { tag: arm64_sequoia,     runner: macos-15, macos: "15" }
     steps:
       - uses: actions/checkout@v7
       - name: Download packages
@@ -350,6 +441,8 @@ jobs:
       # with the same command against a copy of that block whose program is not
       # installed, so the step's reading is one that can go red.
       - name: Pour the bottle
+        env:
+          MACOS_TAG: ${{ matrix.mac.tag }}
         run: ci/runtime-brew.sh
       - name: Verify the installed programs
         env:
@@ -418,10 +511,20 @@ jobs:
         run: ci/runtime-verify-macos.sh
 
   verify-dev-brew:
-    name: "C dev (brew)"
-    needs: [pack-brew]
+    name: "C dev (brew ${{ matrix.mac.tag }})"
+    needs: [merge-brew]
     if: always() && !cancelled()
-    runs-on: macos-latest
+    runs-on: ${{ matrix.mac.runner }}
+    strategy:
+      # The same three rows as B, and for the same reason: what this stage
+      # builds against is a bottle poured on this machine, so a row that did
+      # not exist would be a macOS the consumer project was never built on.
+      fail-fast: false
+      matrix:
+        mac:
+          - { tag: arm64_golden_gate, runner: xcode-27, macos: "27" }
+          - { tag: arm64_tahoe,       runner: macos-26, macos: "26" }
+          - { tag: arm64_sequoia,     runner: macos-15, macos: "15" }
     steps:
       - uses: actions/checkout@v7
       - name: Download packages
@@ -438,6 +541,8 @@ jobs:
       # package resolve" but "is the one package enough to build against", the
       # same narrowing the Arch row makes.
       - name: Install the formula
+        env:
+          MACOS_TAG: ${{ matrix.mac.tag }}
         run: ci/dev-brew.sh
       # Qt's Linguist tools, installed for this stage rather than declared by
       # the formula: the consumer rebuilds QMdmmGui from source and its
@@ -558,7 +663,10 @@ jobs:
       # that step lists what `_site` holds - and a bottle staged afterwards
       # would be served without appearing anywhere, which is how a published
       # file becomes one nobody can find.
-      - name: Publish the bottle into the site
+      # release/publish-brew.sh stages every bottle merge-brew produced, not
+      # one: the formula's block names one per macOS version and a bottle left
+      # behind would be an address that 404s for that version alone.
+      - name: Publish the bottles into the site
         run: |
           mkdir -p _site
           bash "$PWD/release/publish-brew.sh" artifacts/pack-brew _site
@@ -731,7 +839,7 @@ jobs:
         run: bash "$PWD/release/publish-macos.sh" pkgs
 
   # --- the Homebrew tap ----------------------------------------------------
-  # `publish` put the bottle on the site, but a bottle no formula points at has
+  # `publish` put the bottles on the site, but a bottle no formula points at has
   # not been published: the tap is where `brew install` reads the address from,
   # and writing there takes a credential that can reach outside this repository.
   #
@@ -747,11 +855,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       # release/publish-tap.sh: the formula has to name a bottle that is really
-      # on the site and hash to what its own block says, the source pin has to
-      # be this release's tag, and what may differ from the tap's copy is
-      # bounded to the pin and the bottle block - the hand-written recipe is not
-      # this workflow's to edit. The push carries no --force, and what the tap
-      # holds afterwards is read back off the remote rather than taken from the
+      # on the site for EVERY tag in its block and each has to hash to what the
+      # block says, the source pin has to be this release's tag, and what may
+      # differ from the tap's copy is bounded to the pin and the bottle block -
+      # the hand-written recipe is not this workflow's to edit. The push carries
+      # no --force, and what the tap holds afterwards is read back off the
+      # remote rather than taken from the
       # push's exit status.
       - name: Put this release's formula into the tap
         env:
