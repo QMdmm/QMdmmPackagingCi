@@ -5,20 +5,20 @@ Origin: QMdmm
 Label: QMdmm
 Suite: sid
 Codename: sid
-Date: Sat, 03 Oct 2026 14:03:28 UTC
+Date: Sat, 03 Oct 2026 14:30:14 UTC
 Architectures: all
 Components: main
 Description: QMdmm debian sid repository
 MD5Sum:
- d8126bd25f7b314b6fd3291c6a3ff7aa             1940 main/binary-all/Packages
- ca55dab6d873ecbdf69eaf0b17865cf4              721 main/binary-all/Packages.gz
+ a65628b83b6b1533c9ea881d59019227             1940 main/binary-all/Packages
+ 8b3f7fef308c7542f2eb5b860b1c1b41              726 main/binary-all/Packages.gz
 SHA256:
- c8de1e0348f089f1b781f7d94e78eb76aa7b4930c67aaa72e5c04ca7a17214af             1940 main/binary-all/Packages
- c8c7d18e88a7b813a5f04c2aede49e3622ebb0e0ae87d25f73db7239ca2c7dd1              721 main/binary-all/Packages.gz
+ e9f2791499917c88f411f624005a643b4b51bf648d1269b673a275f52c4c548d             1940 main/binary-all/Packages
+ 94b027436934662020290ab73c5719060abc0a6b4369b8c40f51f33c3c8a6cda              726 main/binary-all/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQR/ZMrr6JwGPR8Q+2Pw4LyjHbghGAUCasELMAAKCRDw4LyjHbgh
-GK++AP44lqP0l+qt6zRE0sy3ISu6+Sc+Y4w8+MX21GqIzOAASgEAzkA/WASD8avR
-ezU/1q8IlKd1iCI0jPwj0aVncPzsHQ8=
-=R17V
+iHUEARYKAB0WIQR/ZMrr6JwGPR8Q+2Pw4LyjHbghGAUCasERdgAKCRDw4LyjHbgh
+GFrEAP0VECsyAyzGnnvyGWs2osKjxbL3UW3aq8ODesvExYMP+QD/SMt0MtdvL4HX
+VMEogZfcS62LVMbufSBIp5h3Gucn8Qs=
+=m2S1
 -----END PGP SIGNATURE-----
