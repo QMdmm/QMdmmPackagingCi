@@ -16,6 +16,8 @@ installs the repository configuration and the signing keys.</p>
 <li><a href="alma/10/">alma/10/</a></li>
 <li><a href="alma-keyring/">alma-keyring/</a> (built off-CI)</li>
 <li><a href="arch/rolling/">arch/rolling/</a></li>
+<li><a href="brew/qmdmm-0.0.1.arm64_tahoe.bottle.tar.gz">brew/qmdmm-0.0.1.arm64_tahoe.bottle.tar.gz</a></li>
+<li><a href="brew/qmdmm.rb">brew/qmdmm.rb</a></li>
 <li><a href="debian/forky/">debian/forky/</a></li>
 <li><a href="debian/sid/">debian/sid/</a></li>
 <li><a href="debian/trixie/">debian/trixie/</a></li>
@@ -42,9 +44,9 @@ installs the repository configuration and the signing keys.</p>
 ./alma/10/QMdmm-0.0.1-Linux-dev-common.rpm
 ./alma/10/QMdmm-0.0.1-Linux-dev6.rpm
 ./alma/10/QMdmm-0.0.1-Linux-doc.rpm
-./alma/10/repodata/20d019809d6222e420aa096b1954463cfc44ca9cdaa8422aa91a2a8af889f5c6-other.xml.zst
-./alma/10/repodata/7cde1960226cbcc0b1ac96d1438788139283ce090bf5e3737b5bf882eca1e721-filelists.xml.zst
-./alma/10/repodata/a74960268b90fb82063ed8d8a87a680eef36513ff30b008f28d99d7e932203cd-primary.xml.zst
+./alma/10/repodata/2f414f6cca95f417824e3100cbab08d9b24eb79029d4cdc49b4858bf57c0a60f-primary.xml.zst
+./alma/10/repodata/d03600a1142bc954511e5851b1648d937039e0a4492bcacd327b6c04dd921af7-other.xml.zst
+./alma/10/repodata/dcc772587df2b17f57564787618e0e1cf09e6e798bd93d7745a83495f309ee3f-filelists.xml.zst
 ./alma/10/repodata/repomd.xml
 ./alma/10/repodata/repomd.xml.asc
 ./arch/rolling/qmdmm-6-0.0.1-1-x86_64.pkg.tar.zst
@@ -57,6 +59,8 @@ installs the repository configuration and the signing keys.</p>
 ./arch/rolling/qmdmm.files.sig
 ./arch/rolling/qmdmm.files.tar.gz
 ./arch/rolling/qmdmm.files.tar.gz.sig
+./brew/qmdmm-0.0.1.arm64_tahoe.bottle.tar.gz
+./brew/qmdmm.rb
 ./debian-keyring/forky/dists/forky/InRelease
 ./debian-keyring/forky/dists/forky/Release
 ./debian-keyring/forky/dists/forky/main/binary-all/Packages
@@ -118,27 +122,27 @@ installs the repository configuration and the signing keys.</p>
 ./fedora/44/QMdmm-0.0.1-Linux-dev-common.rpm
 ./fedora/44/QMdmm-0.0.1-Linux-dev6.rpm
 ./fedora/44/QMdmm-0.0.1-Linux-doc.rpm
-./fedora/44/repodata/21acc7f19f82ee941a0020f4df214d9495cd8ae029c2927092549285a1fbf6d5-filelists.xml.zst
-./fedora/44/repodata/ba0246e224b1becf250e53f07fafea315b8154ca247a43df0f044cd1da77c782-other.xml.zst
-./fedora/44/repodata/c272ede687e044b0acbf7286da1c5024c02e615511564e13f081c848ec0ac2d9-primary.xml.zst
+./fedora/44/repodata/7d4d472acbc62247bcd07d015bd6b8c0c92c1b760303eb24c1d71837035cb207-filelists.xml.zst
+./fedora/44/repodata/b1aebe82b7ef44843eddee6711f8903f753dfbfb02df26cb634710151a3a1adb-other.xml.zst
+./fedora/44/repodata/b341a545e7a39170bb4cffb430515d52a065e6393ab7393fa6e260d801e56eb9-primary.xml.zst
 ./fedora/44/repodata/repomd.xml
 ./fedora/44/repodata/repomd.xml.asc
 ./fedora/45/QMdmm-0.0.1-Linux-6.rpm
 ./fedora/45/QMdmm-0.0.1-Linux-dev-common.rpm
 ./fedora/45/QMdmm-0.0.1-Linux-dev6.rpm
 ./fedora/45/QMdmm-0.0.1-Linux-doc.rpm
-./fedora/45/repodata/37d02b174dc2aaeb10bb7c8da9355423f8ddc69ed1d38357a4537ca0795a0ac4-primary.xml.zst
-./fedora/45/repodata/87fd104837dae04b81105a7cf7c212cfd862eaeeb19b4ece29d601b92094f60d-filelists.xml.zst
-./fedora/45/repodata/cfb523ef2a947a48f8e3d39f643121304a19a63fb4394c7b2aadf51ece949d6e-other.xml.zst
+./fedora/45/repodata/5a34d83d8b85c985f009e3bfd2f47807da21707c05d013c066964d91b1dd1d01-filelists.xml.zst
+./fedora/45/repodata/a2d280a755083f638a0c66ac0f0c74958835a832cbbb29cb389dfbd35e33ff65-primary.xml.zst
+./fedora/45/repodata/a8c58f1b0dcea6ec4257635e2f309adcbcf59e39c31aef4ac30850ae5bfa62d5-other.xml.zst
 ./fedora/45/repodata/repomd.xml
 ./fedora/45/repodata/repomd.xml.asc
 ./fedora/rawhide/QMdmm-0.0.1-Linux-6.rpm
 ./fedora/rawhide/QMdmm-0.0.1-Linux-dev-common.rpm
 ./fedora/rawhide/QMdmm-0.0.1-Linux-dev6.rpm
 ./fedora/rawhide/QMdmm-0.0.1-Linux-doc.rpm
-./fedora/rawhide/repodata/a58357fe1b4c4b7c77f2fa057b80965534a297013a8fdd042462896b70cb6693-other.xml.zst
-./fedora/rawhide/repodata/bdb735945b7ce820569c9c4bd1edd036a56724e0d568f614858838fc60a626cf-primary.xml.zst
-./fedora/rawhide/repodata/c5c4f96a4369c97a2d6c53480795372698668d50dceec5ee62eec05410aeb84a-filelists.xml.zst
+./fedora/rawhide/repodata/194eb3ebdd31af7a51900004a53e4c5bc59cdb63742daa1888e928c7504be631-primary.xml.zst
+./fedora/rawhide/repodata/cd9c2b1e2934787d79243fa468070946dd37761cb3c77594505623a0a86771d1-filelists.xml.zst
+./fedora/rawhide/repodata/e5ab294cf16d0abfc76d7accf654201f7b12142f3cb4400b55c6b57c2937bf36-other.xml.zst
 ./fedora/rawhide/repodata/repomd.xml
 ./fedora/rawhide/repodata/repomd.xml.asc
 ./index.html
@@ -172,9 +176,9 @@ installs the repository configuration and the signing keys.</p>
 ./rocky/10/QMdmm-0.0.1-Linux-dev-common.rpm
 ./rocky/10/QMdmm-0.0.1-Linux-dev6.rpm
 ./rocky/10/QMdmm-0.0.1-Linux-doc.rpm
-./rocky/10/repodata/12146926f0c066aa857ae1c3e7ce5d6dab02f9f46360b2277d82445923f60cb2-primary.xml.zst
-./rocky/10/repodata/5232a8ba376bc45f1527fcd6950bc495017548888abb603506a64a7293183be3-filelists.xml.zst
-./rocky/10/repodata/f0e41a7d2a6a412c651bf193a82d5042b833f302b06adcbcf893defd1c16c18b-other.xml.zst
+./rocky/10/repodata/6a8f5b00b5fd7a24cc7596b3fc1271e832b5b975115c7293953b97c219716653-filelists.xml.zst
+./rocky/10/repodata/82545c395b5d4f1e621bc8e8d0ba59ddac6f7520cf32d25aa4bab3492ac91352-primary.xml.zst
+./rocky/10/repodata/8f4ebf048e8735312230a05edcdc4abc04c85598e07fc399a622dcf115435b03-other.xml.zst
 ./rocky/10/repodata/repomd.xml
 ./rocky/10/repodata/repomd.xml.asc
 ./ubuntu-keyring/resolute/dists/resolute/InRelease

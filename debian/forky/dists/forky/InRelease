@@ -5,20 +5,20 @@ Origin: QMdmm
 Label: QMdmm
 Suite: forky
 Codename: forky
-Date: Sat, 03 Oct 2026 02:43:34 UTC
+Date: Sat, 03 Oct 2026 08:27:37 UTC
 Architectures: all
 Components: main
 Description: QMdmm debian forky repository
 MD5Sum:
- 9dd12eaadb486b706750670521964e29             1940 main/binary-all/Packages
- 59fb91df0a59810c26cd7dd39f6159b7              725 main/binary-all/Packages.gz
+ 8c254f67902f68d395e2bd2ad58e6697             1940 main/binary-all/Packages
+ 520239e9746abb09e11bd68a9d8828c9              724 main/binary-all/Packages.gz
 SHA256:
- 9136bfb10a425ff08315fd103f014827a1596fc47be04cb09d26acced1986883             1940 main/binary-all/Packages
- ccd24d5f17b299e677fe15a9ee5b8a27857fbc90cc36b6246b57c3a46fa83dd1              725 main/binary-all/Packages.gz
+ 1bf9b0776299af02bd3a7ab413f19eafe5e091f2f5393b5a86ac75b68d9c0f2a             1940 main/binary-all/Packages
+ 571b040bf921a361f27316580f65027f86f9b4e2052ec06494a48e11996c0806              724 main/binary-all/Packages.gz
 -----BEGIN PGP SIGNATURE-----
 
-iHUEARYKAB0WIQR/ZMrr6JwGPR8Q+2Pw4LyjHbghGAUCasBr1gAKCRDw4LyjHbgh
-GAdwAQCohYVmrd4gK7EGlLRieXA/2oMRKefJXOH34eKOuueqOQD/QhHNo6R2nTRp
-Moi2EsEG+rdcXFY5Oll8phovkxRgeg8=
-=nR0F
+iHUEARYKAB0WIQR/ZMrr6JwGPR8Q+2Pw4LyjHbghGAUCasC8eQAKCRDw4LyjHbgh
+GMv+AQCsjli0sbEpAxwyCwTx42RZ90Xk5Sr593YDf73w7AZuyQD9EaKBkwMjrnWM
+yTTJqhhdPbgmHMeB40UPECw/mqPI1A8=
+=zcWo
 -----END PGP SIGNATURE-----
