@@ -51,15 +51,14 @@
 class Qmdmm < Formula
   desc "Multiplayer card game server, bots and client"
   homepage "https://github.com/QMdmm/QMdmm"
-  url "https://github.com/QMdmm/QMdmm/archive/770c588963f7a0dceed90cc85f5c2e2e90e87727.tar.gz"
-  sha256 "4b0b55c3fc863024d074c059776484554f09b9fa8525f4878b61d329febe189f"
-  version "0.0.1"
+  url "https://github.com/QMdmm/QMdmm/archive/refs/tags/0.0.1.tar.gz"
+  sha256 "2fe4085ca4ccd179f04321bfa4317a47f81cd6eb470d3a791db06b5b9f5a60d5"
   license "AGPL-3.0-or-later"
   head "https://github.com/QMdmm/QMdmm.git", branch: "main"
 
   bottle do
     root_url "https://qmdmm.github.io/QMdmmPackagingCi/brew"
-    sha256 cellar: :any, arm64_tahoe: "fd1536efe0c11927fd1e7d6547e3e5335affd66b5ac91959c7c172edeb988e3d"
+    sha256 cellar: :any, arm64_tahoe: "abc5a50ed39dad022b8fb8f402bd511d8a28337c031ffed148b651d9347b495b"
   end
 
   depends_on "cmake" => :build

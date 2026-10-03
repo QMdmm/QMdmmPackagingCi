@@ -2,13 +2,13 @@ Origin: QMdmm
 Label: QMdmm
 Suite: trixie
 Codename: trixie
-Date: Sat, 03 Oct 2026 08:27:37 UTC
+Date: Sat, 03 Oct 2026 09:00:14 UTC
 Architectures: all
 Components: main
 Description: QMdmm debian trixie repository
 MD5Sum:
- 7a53ae23735aa228951d7fd0079bb9a3             1939 main/binary-all/Packages
- 7b425861ebde846942cd96a8407d0a61              722 main/binary-all/Packages.gz
+ 1897731c6161c3f4c27179255aaaaf10             1939 main/binary-all/Packages
+ a2a8c679732c66c28360526c9f313bf2              720 main/binary-all/Packages.gz
 SHA256:
- 0cbabf89101e2dd5cbe694c98219c0f7bcfc81d21b8af0e862954bfb193b9a4f             1939 main/binary-all/Packages
- 2852c382108cb5063019481c4e5971ca8f5313cf3f0a638d96f0e67aad9693cd              722 main/binary-all/Packages.gz
+ 267d8a1bed2ac01c300dec85738718c13a7c93984183cce3682d42b23b2dd104             1939 main/binary-all/Packages
+ 26738ee2f01c106ed6f7ef578fbbceab00e673a26a82db033a32b8f232c9a5d7              720 main/binary-all/Packages.gz

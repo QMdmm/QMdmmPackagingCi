@@ -9,8 +9,8 @@ Version: 0.0.1
 Installed-Size: 4825
 Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-6.deb
 Size: 1042256
-MD5sum: 5f23890aedc64bcb64201b3d20bb3ef5
-SHA256: 594369500a2d413529e6bd533122b21ca100a45712b4ee568991faffb285bf58
+MD5sum: cff5f3249bdce09976a9777756d7014f
+SHA256: 117c7f465bdfd54578d2510c7c86394304c3757e9c8173fe6df81154e664667e
 
 Architecture: amd64
 Description: A game which is played in primary / high school
@@ -21,9 +21,9 @@ Section: devel
 Version: 0.0.1
 Installed-Size: 57
 Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-dev-common.deb
-Size: 10850
-MD5sum: 2fc3fc67a35cf18df4d18189ec0ca4ae
-SHA256: 83d6c7f1d00ec3900f11b34c58aba24c6a5472b4c4b0c0101e6087f7c500297a
+Size: 10852
+MD5sum: cd37345b220e17c40667b4285ee7d455
+SHA256: 4903cbdfe6cc8b5b6c329c41cdfc4a0ac848c38ec22d2f44e1d951966d0ef50e
 
 Architecture: amd64
 Depends: qmdmm-common-dev (= 0.0.1), qmdmm-6 (= 0.0.1), qt6-base-dev, qt6-declarative-dev, qt6-websockets-dev, qt6-tools-dev, cmake
@@ -35,9 +35,9 @@ Section: devel
 Version: 0.0.1
 Installed-Size: 36
 Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-dev6.deb
-Size: 5988
-MD5sum: 4f86bd99711f5eec129b19c19121e46f
-SHA256: a9e4265924e793aed670019008ea06215b7d634295c6a056629a02030e029d60
+Size: 5982
+MD5sum: 2c546f981052197f2ac0c01011d19763
+SHA256: 604d10281919c88109eecf09f0fe66a5aa25bbb9e50cdbce35dc184995df75b7
 
 Architecture: amd64
 Depends: qmdmm-common-dev (= 0.0.1)
@@ -49,7 +49,7 @@ Section: devel
 Version: 0.0.1
 Installed-Size: 5610
 Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-doc.deb
-Size: 1783438
-MD5sum: f9a61906d2aefc20c94363d644364b20
-SHA256: 1fc392f5af0ec558f81a5f9783fe6535f765b925660029089c6581cd386864b8
+Size: 1783258
+MD5sum: 35f0acebb3f4cff2243a27bf5c17c7fe
+SHA256: aef3834aed000ee9813190c69e7068a29e4a103132ab27fe8ca697ce1f1e487f
 
