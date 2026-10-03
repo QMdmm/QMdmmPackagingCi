@@ -1,7 +1,7 @@
 name: release
 
-# Publish a signed release: one tag in, signed repositories and a trust
-# bootstrap out.
+# Publish a signed release: one tag in, signed repositories, a trust bootstrap
+# and the two macOS products out.
 #
 #   guard → pack → verify-runtime → verify-dev → sign → publish → trust
 #
@@ -22,6 +22,18 @@ name: release
 #   * the Alpine line. abuild signs inside the pack stage because it cannot be
 #     told not to, so that line's release path is a different design rather than
 #     another row here; the lab never exercised it either.
+#
+# The two macOS lines are a job group of their own rather than rows of the
+# stage matrices: a macOS runner cannot run a Linux container, and `runs-on`
+# and `container:` are job-level keys, so no row can differ from its neighbours
+# in either. They run the same three stages through the same ci/ scripts and
+# sign nothing - neither face has a subkey, and the .dmg's only signature is
+# the ad-hoc one macdeployqt applies - which is why stage S is absent from
+# their group rather than empty. What publication means for them is its own
+# question, because neither product is a repository a consumer configures -
+# one is a bottle a formula points at, the other a file a person downloads -
+# so their publish stage is laid out on its own terms rather than as another
+# `cp` into the site.
 #
 # Why dispatch-only: this signs. A signature says "this artifact is worth
 # trusting", and the only honest trigger for that statement is a person
@@ -65,6 +77,25 @@ env:
   # Containers start with LANG unset, which makes Qt switch itself to C.UTF-8
   # and say so on every launch.
   LANG: C.UTF-8
+  # ---- the Homebrew face ---------------------------------------------------
+  # The tap the formula lives in, in Homebrew's own spelling: the repository is
+  # QMdmm/homebrew-qmdmm and `brew tap` drops the prefix, so this is what both
+  # `brew tap` and `brew trust` take. The formula is not in this repository on
+  # purpose - what gets verified has to be the recipe a user gets.
+  HOMEBREW_TAP: QMdmm/qmdmm
+  # Where a bottle is said to live while it is being poured, and the reason it
+  # is an address no user will ever see: stage A cannot reach the machine that
+  # pours, so each consuming stage serves its own copy of the bottle directory
+  # on loopback and the pour goes through a real download with a real checksum
+  # check. Publishing rewrites this one line to the address the bottle will
+  # actually live at, and the trust stage is what proves the rewrite took -
+  # by pouring from the tap a user installs from. See release/publish-brew.sh.
+  BOTTLE_ROOT_URL: http://127.0.0.1:8000
+  # Homebrew updates its own index before an install unless told not to, which
+  # on a macOS runner is minutes spent refreshing a snapshot nothing here
+  # depends on: the formula under test comes from the tap, and its Qt
+  # dependencies resolve from whatever index is on the machine.
+  HOMEBREW_NO_AUTO_UPDATE: '1'
 
 defaults:
   run:
@@ -221,15 +252,221 @@ jobs:
           DIST_KIND: ${{ matrix.fmt }}
         run: ci/run-verify-linux.sh
 
+  # =========================================== the macOS faces (A / B / C)
+  # The two macOS lines, in a job group of their own. Same three questions,
+  # same three stages, a second platform: A packs, B proves the runtime alone
+  # runs on a machine that has nothing else, C proves the one package is enough
+  # to build against. What the group does not have is stage C for the .dmg
+  # line - a disk image carries no development content at all, and pack-macos
+  # asserts exactly that - and stage S for either, since neither face has a
+  # subkey to sign with.
+  #
+  # B and C do not reuse A's machine, for the same reason the Linux rows do not
+  # reuse A's container: with the toolchain still installed, a missing runtime
+  # dependency would be masked by it. On this platform the fresh runner is the
+  # equivalent of the clean container, with one difference the scripts assert
+  # rather than assume - a container starts empty, while a runner image already
+  # carries Homebrew, cmake and ninja, and Qt is the package that would make
+  # stage B vacuous. It is not in the image, and ci/runtime-brew.sh checks that
+  # before it installs anything.
+
+  pack-brew:
+    name: "A pack (brew)"
+    needs: [guard]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The whole stage in ci/pack-brew.sh: tap the repository that holds the
+      # formula, re-derive its source pin for this run's ref, build and bottle
+      # through Homebrew's own commands, and collect the bottle plus the
+      # formula carrying its checksums. Nothing is signed and nothing is
+      # uploaded anywhere: the bottle is an artifact of this run, and the
+      # address it will be poured from is written into it by the publish stage.
+      - name: Pack
+        run: ci/pack-brew.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pack-brew
+          path: out
+          if-no-files-found: error
+
+  pack-macos:
+    name: "A pack (macos)"
+    needs: [guard]
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      # The one line in this file the workflow hands Qt to rather than the
+      # platform doing it, and not as a preference: a bundle has to be built
+      # against an archive whose frameworks can be copied into it, and
+      # Homebrew's Qt has QML plugins that are symlinks into the Cellar, which
+      # dangle the moment they are copied.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.12.*'
+          modules: 'qtwebsockets'
+      # ci/pack-macos.sh: fetch QMdmm at this run's ref, configure against that
+      # archive for both architectures, build, pack a universal .dmg, and
+      # assert the shape of what came out on the mounted image rather than on
+      # the build tree.
+      - name: Pack
+        run: ci/pack-macos.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: pack-macos
+          path: out
+          if-no-files-found: error
+
+  # `if: always()` for the reason the container rows give: GitHub cannot say
+  # "this row depends on that row of that matrix", so a row whose own pack
+  # failed fails on its missing artifact instead of being silently skipped -
+  # and a silently skipped row would take stage S with it.
+  verify-runtime-brew:
+    name: "B runtime (brew)"
+    needs: [pack-brew]
+    if: always() && !cancelled()
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: pack-brew
+          path: pkgs
+      # coreutils, for gtimeout. The container rows have it in the image; here
+      # it is a harness dependency the workflow installs, on the same footing
+      # as the `Install bash` step the Alpine line needs. Nothing it installs
+      # can stand in for the Qt the dependency assertion is about - the "this
+      # runner has no Qt" check runs in ci/runtime-brew.sh before the formula
+      # is installed.
+      - name: Install coreutils (for gtimeout)
+        run: brew install coreutils
+      # ci/runtime-brew.sh: prove the runner really has no Qt, tap and trust,
+      # put stage A's formula into the tap, serve the bottle on loopback, pour
+      # it - and insist that it was poured rather than built from source, which
+      # is the reading that says the bottle block and the bottle agree. It ends
+      # with the recipe's own `test do` block run through `brew test`, and then
+      # with the same command against a copy of that block whose program is not
+      # installed, so the step's reading is one that can go red.
+      - name: Pour the bottle
+        run: ci/runtime-brew.sh
+      - name: Verify the installed programs
+        env:
+          MACOS_FACE: brew
+        run: ci/runtime-verify-macos.sh
+
+  # Two rows, one per architecture, and this is the only place the image's
+  # x86_64 slice can be run at all: a universal image carries both slices but a
+  # machine starts one of them, so on an arm64 runner it is the arm64 slice,
+  # and the x86_64 slice's first real execution has to happen on Intel
+  # hardware. Rosetta would not answer the same question - a translated run
+  # says something about Rosetta rather than about what an Intel user gets. The
+  # producing job stays single and deliberately: one universal .dmg is built
+  # once and both rows verify that same artifact, so what the matrix spreads is
+  # the machine, not the build.
+  #
+  # `macos-26-intel` and not `macos-15-intel`, because the image's lowest
+  # supported macOS is whatever `pack-macos` built on - the floor of the Qt
+  # inside it, which ci/pack-macos.sh reads rather than assumes - and the
+  # bundle declares that floor in the two places a loader and the Finder look.
+  # An older runner would produce a dyld error rather than a reading, which is
+  # why ci/runtime-macos.sh reports the bundle's own floor as well as the slice
+  # it actually started.
+  verify-runtime-macos:
+    name: "B runtime (macos-${{ matrix.mac.arch }})"
+    needs: [pack-macos]
+    if: always() && !cancelled()
+    runs-on: ${{ matrix.mac.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        mac:
+          - arch: arm64
+            runner: macos-latest
+          - arch: x86_64
+            runner: macos-26-intel
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: pack-macos
+          path: pkgs
+      - name: Install coreutils (for gtimeout)
+        run: brew install coreutils
+      # ci/runtime-macos.sh: assert this runner has no Qt, mount the image and
+      # copy the application across the way the image's own readme tells a user
+      # to. That the copy is what gets run matters here more than on the
+      # Homebrew line: the framework lookups are recorded in the bundle's
+      # Info.plist and are only exercised by a copy that moved.
+      #
+      # MACOS_ARCH is the row's premise, handed to the script so it can assert
+      # it rather than assume it: a row labelled x86_64 that landed on an arm64
+      # machine would start the other slice and be a duplicate of its neighbour
+      # wearing a different name.
+      - name: Mount the image and copy the application
+        env:
+          MACOS_ARCH: ${{ matrix.mac.arch }}
+        run: ci/runtime-macos.sh
+      # The same verification script the Homebrew line runs, with the face
+      # switched: the programs come from the bundle, and the dependency
+      # assertion points the other way - nothing may resolve out of it.
+      - name: Verify the installed programs
+        env:
+          MACOS_FACE: dmg
+        run: ci/runtime-verify-macos.sh
+
+  verify-dev-brew:
+    name: "C dev (brew)"
+    needs: [pack-brew]
+    if: always() && !cancelled()
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: pack-brew
+          path: pkgs
+      - name: Install coreutils (for gtimeout)
+        run: brew install coreutils
+      # ci/dev-brew.sh: the same pour as stage B on a machine of its own, plus
+      # the QMdmm sources the consumer project builds. There is no separate dev
+      # package to install - one formula carries the runtime, the headers and
+      # the CMake package - so what this stage asks is not "does a second
+      # package resolve" but "is the one package enough to build against", the
+      # same narrowing the Arch row makes.
+      - name: Install the formula
+        run: ci/dev-brew.sh
+      # Qt's Linguist tools, installed for this stage rather than declared by
+      # the formula: the consumer rebuilds QMdmmGui from source and its
+      # CMakeLists asks for LinguistTools, while running the three programs
+      # does not need them. It goes here and not in the step above because
+      # qttools depends on qtbase and qtdeclarative, and stage C opens by
+      # asserting that the runner arrived without Qt.
+      - name: Install Qt's Linguist tools (for the consumer build)
+        run: brew install qttools
+      - name: Build the consumer project
+        run: ci/build-verify-macos.sh
+      - name: Run the rebuilt Bot against the installed Server
+        run: ci/run-verify-macos.sh
+
   # ================================================================= stage S
   # Sign what stage A built, once per row, in the row's own image and with that
   # row's subkey.
   #
-  # `needs` on BOTH verify stages is the gate this workflow exists for. A
+  # `needs` on every verify stage is the gate this workflow exists for. A
   # signature asserts that the thing it covers is worth trusting, so appending
   # one to packages nobody has installed yet means the release is interrupted
   # *after* the signature is already public. Waiting for B and C means a broken
   # package is found while nothing has been signed.
+  #
+  # The macOS stages are in that list too, and that is a decision rather than an
+  # accident of naming: publish is one act, so a macOS line that fails after the
+  # Linux repositories are signed and public would interrupt the release for a
+  # reason the signature cannot express. One platform's failure holds the whole
+  # release, which for a release is the wanted behaviour.
   #
   # GitHub cannot express "this row depends on that row of that matrix", so this
   # waits for the stages as a whole: if any row fails, nothing is signed. For a
@@ -240,7 +477,7 @@ jobs:
   # and sign-repo-*.sh asserts as much before it signs anything.
   sign:
     name: "S sign (${{ matrix.line }} ${{ matrix.version }})"
-    needs: [verify-runtime, verify-dev]
+    needs: [verify-runtime, verify-dev, verify-runtime-brew, verify-dev-brew, verify-runtime-macos]
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.image }}
@@ -289,12 +526,22 @@ jobs:
   # will point at. The collection walks the artifact names rather than a list of
   # lines: a hard-coded list is what silently drops every artifact the day the
   # naming changes.
+  #
+  # The Homebrew line comes in here too, and it is the one publication that is
+  # not a directory of packages: what a consumer of that line configures is a
+  # tap, and what the tap needs from a release is the bottle and the formula
+  # that names its address. Both are staged by release/publish-brew.sh, which is
+  # also where the argument for the address being this site's lives.
   publish:
     name: "publish"
     needs: [sign]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      # Everything, by name rather than by a list of the names this job knows
+      # about: the repository artifacts it walks below, and the two macOS
+      # products, which are this job's business for the bottle and the next
+      # job's for the disk image.
       - uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -306,6 +553,15 @@ jobs:
       # moment it becomes public.
       - name: Check the fingerprint list against the keys it lists
         run: bash "$PWD/release/check-fingerprints.sh"
+
+      # Before the site is assembled, because the index written at the end of
+      # that step lists what `_site` holds - and a bottle staged afterwards
+      # would be served without appearing anywhere, which is how a published
+      # file becomes one nobody can find.
+      - name: Publish the bottle into the site
+        run: |
+          mkdir -p _site
+          bash "$PWD/release/publish-brew.sh" artifacts/pack-brew _site
 
       - name: Assemble the site
         run: |
@@ -351,6 +607,16 @@ jobs:
             if printf '%s\n' "$lines" | grep -qx "$top"; then
               for ver in $(cd "_site/$top" && find . -mindepth 1 -maxdepth 1 -type d | sed 's|^\./||' | sort); do
                 echo "<li><a href=\"$top/$ver/\">$top/$ver/</a></li>"
+              done
+            elif [ "$top" = brew ]; then
+              # The Homebrew face, named here rather than added to lines.tsv: that
+              # list is what the fingerprint gate and the three stage matrices
+              # read, and this face has neither a subkey nor a row. Its contents
+              # are listed by file because each one is an address somebody needs -
+              # the bottle a formula fetches, and the formula itself - and
+              # "(built off-CI)" would be the wrong thing to say about either.
+              for f in $(cd "_site/$top" && find . -mindepth 1 -maxdepth 1 -type f | sed 's|^\./||' | sort); do
+                echo "<li><a href=\"$top/$f\">$top/$f</a></li>"
               done
             else
               echo "<li><a href=\"$top/\">$top/</a> (built off-CI)</li>"
@@ -413,6 +679,45 @@ jobs:
             sleep 10
           done
           echo "!! Pages never served ${GITHUB_SHA:0:7}"; exit 1
+
+  # ================================== publish (the macOS disk image)
+  # The second macOS product, and the only stage in this workflow that writes
+  # outside the repository it runs in. A .dmg is not an input to a recipe the way
+  # a bottle is - it is the product itself, and the page a person looks at to
+  # download it is the product's own release page. No token a workflow is issued
+  # can reach that page, so this one step carries PRODUCT_RELEASE_TOKEN, and it
+  # is the only thing in this file that does.
+  #
+  # It runs after `publish` rather than beside it because the two are one
+  # publication: a run whose site failed has released nothing, and an image on a
+  # release whose repositories were never published would be the only thing
+  # anyone could get from it.
+  #
+  # What it must never do is overwrite. The release it attaches to is assembled
+  # by several runs, so the assets already on it are somebody else's; the script
+  # reads the asset names before the upload and again after it and refuses to
+  # accept a difference other than the one file it was handed.
+  publish-macos:
+    name: "publish (the macOS disk image)"
+    needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Download the disk image
+        uses: actions/download-artifact@v8
+        with:
+          name: pack-macos
+          path: pkgs
+      # release/publish-macos.sh: the release has to exist before a run is
+      # dispatched, the image's version has to be the release's tag, an asset
+      # already under this name is never replaced, and what the upload did is
+      # read back off the release rather than taken from the upload's exit
+      # status. A missing token is a failure rather than a skip, because "ran
+      # and published nothing" is the one outcome worth failing for.
+      - name: Attach the disk image to the release
+        env:
+          GH_TOKEN: ${{ secrets.PRODUCT_RELEASE_TOKEN }}
+        run: bash "$PWD/release/publish-macos.sh" pkgs
 
   # ================================================================= trust
   # The path a real user walks: install the keyring, establish trust in the

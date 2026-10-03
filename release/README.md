@@ -28,6 +28,8 @@ called differently (its repository was `lab`, so its package database was
 | `sign-repo-<fmt>.sh` | S sign | CI, in the row's own image | **that line's subkey** |
 | `mkrepo-debian.sh` | (helper for S/deb) | CI | the key it is handed |
 | `check-fingerprints.sh` | gate in the publish job | CI | nothing |
+| `publish-brew.sh` | publish: stage the bottle, write its address into the formula | CI, publish job | nothing |
+| `publish-macos.sh` | publish: attach the `.dmg` to the product repository's release | CI, publish job | **a token for the product repository** |
 | `consume-<consumer>.sh` | trust: install and verify as a consumer | CI, clean container | nothing |
 | `consume-apt-keyring.sh`, `consume-keyring-package.sh`, `consume-dnf-keyring-package.sh` | trust: the keyring bootstrap | CI, clean container | nothing |
 | `mkkeyring-deb.sh`, `mkkeyring-rpm.sh` | build the root-signed keyring source | **a trusted machine, never CI** | the **root** key |
@@ -38,6 +40,32 @@ called differently (its repository was `lab`, so its package database was
 and the line fingerprints. There is no such file in this repository and there
 must not be: the root secret never enters CI, which is what makes the
 root-signed keyring source a trusted-machine step rather than a workflow one.
+
+## The two macOS faces, and why they publish apart
+
+The macOS lines are not rows of the other three stages' matrices - a macOS
+runner cannot run a Linux container, and `runs-on` and `container:` are job-level
+keys - so they run as a group of their own in `release.yml`. Neither signs
+anything: a bottle is verified by the checksum in the formula that points at it
+and the `.dmg` by the ad-hoc signature `macdeployqt` applies, and neither has a
+subkey to sign with.
+
+They also publish to two different places, which is the part worth stating
+plainly:
+
+* **the bottle goes to the site**, beside the twelve package lines and under the
+  same `GITHUB_TOKEN` the rest of the publish job uses, because that address is
+  the repository the whole publication lives in. `publish-brew.sh` stages it and
+  writes the address into the formula in one step, so the URL and the file it
+  names cannot come from two different opinions. The formula a tap should carry
+  is published beside the bottle as `brew/qmdmm.rb`.
+* **the `.dmg` goes to the product repository's release**, because it is not an
+  input to a recipe - it is the product, and the page a person downloads it from
+  is the product's own. No token a workflow is issued can write there, so this is
+  the one stage in this directory that carries a credential of its own
+  (`PRODUCT_RELEASE_TOKEN`, the `publish-macos` job). It attaches to a release
+  that already exists and never overwrites an asset; the reasoning is at the top
+  of the script.
 
 ## What is not here
 
