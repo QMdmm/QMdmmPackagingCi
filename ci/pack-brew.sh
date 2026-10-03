@@ -50,10 +50,25 @@ test -f "$formula"
 git init qmdmm-src
 git -C qmdmm-src remote add origin "$QMDMM_REPO"
 git -C qmdmm-src fetch --depth 1 origin "$QMDMM_REF"
+# A bare ref name writes FETCH_HEAD and creates no ref of its own, and the check
+# further down (`git describe --tags`) reads local refs - so a ref that names a
+# tag has to be fetched by its full refspec as well, or that check cannot see
+# the tag at all and the tag shape is never chosen. Silently: the fallback below
+# is a well-formed formula, and it is only a *different* recipe from the one the
+# tap ships. The first dispatched release went that way, and
+# release/publish-tap.sh is where it surfaced.
+if git -C qmdmm-src ls-remote --exit-code --tags --refs origin "refs/tags/$QMDMM_REF" >/dev/null 2>&1; then
+  git -C qmdmm-src fetch --depth 1 origin "+refs/tags/$QMDMM_REF:refs/tags/$QMDMM_REF"
+fi
+
 git -C qmdmm-src checkout --detach FETCH_HEAD
 echo "QMdmm HEAD: $(git -C qmdmm-src log --oneline -1)"
 
-sha=$(git -C qmdmm-src rev-parse FETCH_HEAD)
+# `^{commit}`, because for an annotated tag FETCH_HEAD is the tag *object* - a
+# sha that is in no branch's history and that no other archive URL is built
+# from. This value becomes the url below and is printed as a commit, so it has
+# to be one.
+sha=$(git -C qmdmm-src rev-parse "FETCH_HEAD^{commit}")
 web=${QMDMM_REPO%.git}
 version=$(awk '/^project\(/ { in_project = 1 } \
               in_project && /VERSION/ { \
@@ -64,8 +79,13 @@ if [ -z "$version" ]; then
   exit 1
 fi
 
-commented=''
-if tag=$(git -C qmdmm-src describe --exact-match --tags FETCH_HEAD 2>/dev/null) && [ -n "$tag" ]; then
+# `describe` and not a comparison of names: it can only report a tag that
+# carries the object that was actually fetched, so a branch whose name happens
+# to match a tag cannot make this stage pin a commit it did not build. `|| true`
+# because "this ref is not a tag" is an answer and not a failure, and it is the
+# normal one on the smoke line, which builds a branch.
+tag=$(git -C qmdmm-src describe --exact-match --tags FETCH_HEAD 2>/dev/null || true)
+if [ -n "$tag" ]; then
   url="$web/archive/refs/tags/$tag.tar.gz"
   stated=''
   source_line="tag $tag (commit $sha), version $version"
