@@ -67,8 +67,23 @@ ROOT_URL="$PAGES/brew"
 # being derived from the other.
 manifest="$PKGS/MANIFEST.tsv"
 [ -f "$manifest" ] || { echo "::error::$manifest is missing"; exit 1; }
-head -1 "$manifest" | grep -qE '^package\tversion\ttag\tfile$' || {
-  echo "::error::$manifest does not begin with package/version/tag/file, so this is not the manifest merge-brew.sh writes; the columns below would be read as the wrong thing:"; cat "$manifest"; exit 1; }
+# The four field names are read rather than matched with a regular expression,
+# and that is not a style preference: this script runs on the publish job's
+# Linux runner, whose `grep` is GNU. There, `\t` in a pattern is not a tab - it
+# is a stray escape that GNU grep resolves to a literal `t`, so
+# `grep -qE '^package\tversion...'` matches no header at all and refuses every
+# manifest. The tell, if one is reading the log: `grep: warning: stray \ before
+# t`, three times. A rehearsal on macOS does not see this, because the grep
+# there is BSD and BSD grep does read `\t` as a tab - the same line passes. (BSD
+# sed is the other half of the same family, and does not behave the same way in
+# both positions: `s/\t/  /g` is fine, but a `[ \t]` class there matches a space
+# and not a tab. ci/runtime-verify-macos.sh and ci/build-verify-macos.sh both
+# carry that reading.) Reading four fields has no engine to depend on.
+IFS=$'\t' read -r h_pkg h_ver h_tag h_file < "$manifest" || true
+if [ "$h_pkg" != package ] || [ "$h_ver" != version ] || [ "$h_tag" != tag ] || [ "$h_file" != file ]; then
+  echo "::error::$manifest does not begin with package/version/tag/file, so this is not the manifest merge-brew.sh writes; the columns below would be read as the wrong thing. Read as fields, it begins '$h_pkg/$h_ver/$h_tag/$h_file':"
+  cat "$manifest"; exit 1
+fi
 version=$(awk -F'\t' 'NR>1 && $1=="qmdmm" {print $2}' "$manifest" | sort -u)
 n_tags=$(awk -F'\t' 'NR>1 && $1=="qmdmm"' "$manifest" | wc -l | tr -d ' ')
 [ "$n_tags" -ge 1 ] || { echo "::error::no qmdmm row in $manifest; it holds:"; cat "$manifest"; exit 1; }
