@@ -9,6 +9,12 @@
 # consume-dnf.sh starts from a repository a consumer already trusts; this one
 # starts from nothing but a key fingerprint read off the website.
 #
+# One cell per line-and-version. Both the package name and the repo file it
+# ships name a single version, so a `qmdmm-release-fedora-44` handed to a Fedora
+# 45 consumer would leave that consumer reading 44's packages - and an install
+# followed by a refresh would report success either way. Running the cell on the
+# distribution the package claims is what makes the claim testable.
+#
 #   env: PAGES, LINE, VERSION, ROOT_FPR, EXPECT_SHA, PKGS (optional)
 #
 # What is checked:
@@ -94,8 +100,8 @@ echo
 echo "--- 0) the keyring source, verified against the published bytes ---"
 # Independent of dnf: stage A of the trust chain is a claim about a signature,
 # and dnf's cooperation is then a separate reading in A below.
-fetch "$PAGES/$LINE-keyring/repodata/repomd.xml"     "$W/repomd.xml"
-fetch "$PAGES/$LINE-keyring/repodata/repomd.xml.asc" "$W/repomd.xml.asc"
+fetch "$PAGES/$LINE-keyring/$VERSION/repodata/repomd.xml"     "$W/repomd.xml"
+fetch "$PAGES/$LINE-keyring/$VERSION/repodata/repomd.xml.asc" "$W/repomd.xml.asc"
 gpg --homedir "$W/gh" --batch --quiet --import "$W/keys/root.asc" 2>/dev/null
 gpg --homedir "$W/gh" --status-fd 3 --verify "$W/repomd.xml.asc" "$W/repomd.xml" \
     3> "$W/status" > "$W/gpgv.log" 2>&1 || true
@@ -112,8 +118,8 @@ echo
 echo "--- A) the one manual step: the root-signed source, under the ROOT key alone ---"
 cat > "/etc/yum.repos.d/$BOOT.repo" <<EOF
 [$BOOT]
-name=QMdmm keyring source ($LINE)
-baseurl=$PAGES/$LINE-keyring
+name=QMdmm keyring source ($LINE $VERSION)
+baseurl=$PAGES/$LINE-keyring/$VERSION
 enabled=1
 gpgcheck=0
 repo_gpgcheck=1

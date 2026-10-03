@@ -1,0 +1,25 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Origin: QMdmm
+Label: QMdmm
+Suite: sid
+Codename: sid
+Date: Sat, 03 Oct 2026 02:33:04 UTC
+Architectures: all
+Components: main
+Description: QMdmm apt repository
+MD5Sum:
+ 65f388f0c9c32c6c353ad12a35cdd225              637 main/binary-all/Packages
+ 37c65395434010b4d9babe8132520400              429 main/binary-all/Packages.gz
+SHA256:
+ 46fdc8bc1580590b36dbdeabe86a7810edaabc4a0b288ef970f92da2af9af3a9              637 main/binary-all/Packages
+ 22da320f6ae85b9d004f36af5aa83c3b21b9ad6ce95dddde816258176cd584b6              429 main/binary-all/Packages.gz
+-----BEGIN PGP SIGNATURE-----
+
+iJEEARYKADkWIQR2Zltsf2ckmdoNQCfmpyyXuM6DjQUCasBpYBsUgAAAAAAEAA5t
+YW51MiwyLjUrMS4xMiwwLDMACgkQ5qcsl7jOg43XKQEAmr5kCmDYDuhNx3SYqXcL
+BCsJsh4kmHzpIvFqXcK49TgBAPV6cZdh+LS9q86lguyWcm7ez7gcplicvKHG8Wq9
+AvwJ
+=/0XL
+-----END PGP SIGNATURE-----

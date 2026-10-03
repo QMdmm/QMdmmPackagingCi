@@ -1,0 +1,14 @@
+Origin: QMdmm
+Label: QMdmm
+Suite: stonking
+Codename: stonking
+Date: Sat, 03 Oct 2026 02:33:05 UTC
+Architectures: all
+Components: main
+Description: QMdmm apt repository
+MD5Sum:
+ 391a7b5b225b9a1ef1a61ef4b273dd8e              637 main/binary-all/Packages
+ 28214f88dad9a10ac4cc0323e4c5a6e2              429 main/binary-all/Packages.gz
+SHA256:
+ 0fdc2ef047330af85b395bf08bceef10fea3450916ee4857575511c3f35bfc45              637 main/binary-all/Packages
+ 2074f5661125f7d6803823f74cc883dbee04b1d6b8835362cc9ab11cf4cf1a30              429 main/binary-all/Packages.gz

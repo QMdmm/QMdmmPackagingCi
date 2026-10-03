@@ -10,7 +10,7 @@
 # this cell the claim "install the package and you are set up" has no witness at
 # all (FINDINGS 10.8).
 #
-#   env: PAGES, ROOT_FPR, EXPECT_SHA
+#   env: PAGES, LINE, VERSION, ROOT_FPR, EXPECT_SHA
 #
 # What is checked:
 #   A. holding only the ROOT key, the keyring source is readable and its package
@@ -23,9 +23,16 @@
 # C is the point of the cell. A keyring package that installs but configures
 # nothing is indistinguishable from a working one, right up to the moment a user
 # tries to use it.
+#
+# One cell per deb suite, and the reason is B and C: the package bakes
+# `Suites:` and both URIs into what it writes on disk, so a package built for
+# the wrong distribution would still install, still bring two sources, and
+# still refresh - against the wrong repository. Only running it on the
+# distribution it names can see that.
 set -euo pipefail
 
 PAGES="${PAGES:?}"; ROOT_FPR="${ROOT_FPR:?}"; EXPECT_SHA="${EXPECT_SHA:?}"
+LINE="${LINE:?}"; VERSION="${VERSION:?}"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 KEYDIR=/etc/apt/keyrings
 mkdir -p "$KEYDIR" "$W/none"
@@ -34,7 +41,7 @@ source "$(dirname "$0")/lib-site.sh"
 SRC=/etc/apt/sources.list.d/qmdmm-manual.list
 PKG=qmdmm-archive-keyring
 
-echo "=== B/install-keyring-package ==="
+echo "=== B/install-keyring-package $LINE $VERSION ==="
 echo "  $(os_name)"
 
 echo
@@ -51,7 +58,7 @@ wait_for_publish "$PAGES" "$EXPECT_SHA"
 echo
 echo "--- keys, from Pages only ---"
 fetch "$PAGES/keys/qmdmm-root.gpg"           "$KEYDIR/root.gpg"
-fetch "$PAGES/keys/debian/qmdmm-packages.gpg" "$KEYDIR/packages.gpg"
+fetch "$PAGES/keys/$LINE/qmdmm-packages.gpg" "$KEYDIR/packages.gpg"
 chmod 644 "$KEYDIR"/root.gpg "$KEYDIR"/packages.gpg
 [ "$(key_fpr "$KEYDIR/root.gpg")" = "$ROOT_FPR" ] \
   || { echo "  !! the root key file is not $ROOT_FPR"; exit 1; }
@@ -60,7 +67,7 @@ echo
 echo "--- A) the one manual step: read the keyring source under the ROOT key ---"
 # This is all a user does by hand, and the whole reason the keyring source exists
 # as a separate repository: it is the one thing only the root key may sign.
-echo "deb [signed-by=$KEYDIR/root.gpg] $PAGES/debian-keyring sid main" > "$SRC"
+echo "deb [signed-by=$KEYDIR/root.gpg] $PAGES/$LINE-keyring/$VERSION $VERSION main" > "$SRC"
 cat "$SRC" | sed 's/^/  | /'
 if ! apt-get update -o Dir::Etc::sourcelist="$SRC" -o Dir::Etc::sourceparts="$W/none" \
        > "$W/a.log" 2>&1; then
@@ -106,7 +113,7 @@ if ! apt-get update > "$W/c.log" 2>&1; then
   sed 's/^/    /' "$W/c.log"; exit 1
 fi
 grep -i qmdmm "$W/c.log" | sed 's/^/    /' || true
-for u in "debian-keyring" "debian/sid"; do
+for u in "$LINE-keyring/$VERSION" "$LINE/$VERSION"; do
   grep -q "$u" "$W/c.log" || { echo "  !! nothing was fetched from $u"; exit 1; }
 done
 
@@ -125,4 +132,4 @@ for p in $runtime; do
 done
 
 echo
-echo "=== B/install-keyring-package: PASS ==="
+echo "=== B/install-keyring-package $LINE $VERSION: PASS ==="

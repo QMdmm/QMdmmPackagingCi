@@ -17,7 +17,15 @@
 # from the ROOT-signed keyring source, whose InRelease only the root key can
 # sign. That is the whole reason the keyring source exists as a separate repo.
 #
+# One invocation builds ONE suite, and each suite gets its own repository
+# directory (`<pages>/<distro>-keyring/<suite>`). The reason is in the payload:
+# the sources.list.d entry below bakes `Suites: $SUITE` into the machine that
+# installs the package. A trixie consumer handed the sid package would have
+# their day-to-day source pointed at `debian/sid` - a wrong distribution, and
+# one that only looks harmless while the two happen to carry the same build.
+#
 # usage: mkkeyring-deb.sh <distro> <pages-base> [version]
+# env:   SUITE  the distribution this package configures (default sid)
 # TRUSTED-MACHINE TOOL, not a CI step.
 # It sources the local keyring env on purpose: the keyring package is the thing
 # the ROOT key signs, and the root secret never enters CI. A CI job must not
@@ -46,7 +54,7 @@ chmod 644 "$ROOT/usr/share/keyrings/"*.gpg
 
 cat > "$ROOT/etc/apt/sources.list.d/qmdmm.sources" <<EOF
 Types: deb
-URIs: $BASE/$DISTRO-keyring
+URIs: $BASE/$DISTRO-keyring/$SUITE
 Suites: $SUITE
 Components: main
 Signed-By: /usr/share/keyrings/qmdmm-root.gpg
@@ -77,7 +85,15 @@ EOF
   while read -r f; do printf '%s  %s\n' "$(md5_of "$f")" "$f"; done \
 ) > "$ROOT/DEBIAN/md5sums"
 
-POOL="site/$DISTRO-keyring/pool/main/q/$PKG"
+# One directory per suite, not one per distribution. `mkrepo-debian.sh` lists
+# every .deb it finds under `$OUT/pool` into the suite it is writing, so two
+# suites sharing a pool would each advertise both keyring packages - and since
+# each package bakes its own `Suites:`, apt could install the one belonging to
+# the other distribution. Keeping the pool inside the suite's directory makes
+# that unrepresentable. (This tool is run once per suite; the directory is what
+# the consumer's bootstrap stanza names.)
+OUT="site/$DISTRO-keyring/$SUITE"
+POOL="$OUT/pool/main/q/$PKG"
 mkdir -p "$POOL"
 rm -f "$POOL"/*.deb
 DEB="$(cd "$POOL" && pwd)/${PKG}_${VERSION}_all.deb"
@@ -95,4 +111,4 @@ echo "  --- control ---"
 sed 's/^/    /' "$ROOT/DEBIAN/control"
 echo
 echo "  NEXT: re-sign the keyring source so it serves this package:"
-echo "    bash release/mkrepo-debian.sh <root-fpr> site/$DISTRO-keyring $SUITE"
+echo "    bash release/mkrepo-debian.sh <root-fpr> $OUT $SUITE"

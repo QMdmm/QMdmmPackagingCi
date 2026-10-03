@@ -1,0 +1,14 @@
+Origin: QMdmm
+Label: QMdmm
+Suite: forky
+Codename: forky
+Date: Sat, 03 Oct 2026 02:33:05 UTC
+Architectures: all
+Components: main
+Description: QMdmm apt repository
+MD5Sum:
+ c6d7fb9202f3300576371e38aafb71a6              637 main/binary-all/Packages
+ ced20e86e40e19615c03f754cc9e0fe7              429 main/binary-all/Packages.gz
+SHA256:
+ 974ece2ae0844e3a4614550270b168cafae6a24bd6934372c6fb44f3f6542f56              637 main/binary-all/Packages
+ 76be968f763df5d2c71737f9dd83056a4df7bad7ce3522aa2927ad92fec63260              429 main/binary-all/Packages.gz

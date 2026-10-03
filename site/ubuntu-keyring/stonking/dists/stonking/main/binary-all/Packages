@@ -1,0 +1,15 @@
+Package: qmdmm-archive-keyring
+Version: 2026.10.03.1
+Architecture: all
+Maintainer: QMdmm Packaging <nemn9852@agent.qq.com>
+Section: misc
+Priority: optional
+Description: QMdmm archive signing keys and repository configuration
+ Ships the QMdmm root public key, this distribution's operational
+ subkey, and the sources.list.d entries for both the keyring source
+ and the day-to-day source. Installing it configures both repos.
+Filename: pool/main/q/qmdmm-archive-keyring/qmdmm-archive-keyring_2026.10.03.1_all.deb
+Size: 1784
+MD5sum: 0b3389e0b4a66b4507de0d6e7ee724de
+SHA256: 8e0ccdcc45c18368d1d603cafbfff7f1043edb2cbcb9526a0838d1abc94f5b21
+

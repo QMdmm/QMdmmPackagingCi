@@ -11,7 +11,12 @@
 #
 # Two repositories, not one, exactly as on the apt side:
 #
-#   <pages>/<line>-keyring      ROOT-signed. Ships exactly one package.
+#   <pages>/<line>-keyring/<version>   ROOT-signed. Ships exactly one package -
+#                               the one whose repo file points back at
+#                               <pages>/<line>/<version>. A version gets its
+#                               own directory rather than sharing one, for the
+#                               same reason the deb side gives each suite its
+#                               own.
 #   <pages>/<line>/<version>    subkey-signed. The day-to-day source, built by
 #                               stage S in CI.
 #
@@ -56,7 +61,10 @@ BUILDER="${RPM_BUILDER:-neve@10.31.42.18}"
 
 PKG="qmdmm-release-$LINE-$VERSION"
 KEYNAME="RPM-GPG-KEY-qmdmm-$LINE"
-OUT="site/$LINE-keyring"
+# One repository per line-and-version: the package name and the repo file's
+# baseurl both name a single version, so two versions sharing a repository would
+# mean one of them being served under the other's directory name.
+OUT="site/$LINE-keyring/$VERSION"
 
 [ -f "keys/$LINE/qmdmm-packages.gpg" ] || { echo "!! keys/$LINE/qmdmm-packages.gpg missing"; exit 1; }
 [ -f keys/qmdmm-root.gpg ]             || { echo "!! keys/qmdmm-root.gpg missing"; exit 1; }

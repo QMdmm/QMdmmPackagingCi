@@ -44,10 +44,14 @@ root-signed keyring source a trusted-machine step rather than a workflow one.
 * **`rotate-line-local.sh`** — the rotation tool, still in the lab. It is on the
   path a line takes *after* a leak rather than on the path to a first release,
   and its env-file rewriting assumes the lab's layout. It needs its own pass.
-* **The keyring material under `site/`** — the deb archive-keyring package and
+* **The keyring material under `site/`** — the deb archive-keyring packages and
   the rpm `*-release` packages, all root-signed. These are built off-CI by the
-  `mkkeyring-*.sh` tools above and committed at their published path. Nothing
-  has been built yet.
+  `mkkeyring-*.sh` tools above and committed at their published path, **one
+  directory per suite / per version** (`site/debian-keyring/<suite>/`,
+  `site/fedora-keyring/<version>/`): each package bakes the distribution it
+  configures into the consumer's `sources.list.d`, so one directory serving two
+  of them would be able to hand a consumer the wrong one. `mkkeyring-deb.sh`
+  carries the full argument at its top.
 * **The Alpine line.** `apk` signs inside stage A rather than in a signing stage
   of its own (abuild cannot be told not to sign), and the lab never exercised
   that line at all — it is the one line whose release path is undesigned rather

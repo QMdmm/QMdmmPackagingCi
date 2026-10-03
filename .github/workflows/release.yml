@@ -426,7 +426,7 @@ jobs:
   # signed repository" are different claims, and a cell that did both would not
   # say which one broke.
   trust-keyring:
-    name: "trust: the keyring bootstrap (${{ matrix.fmt }})"
+    name: "trust: the keyring bootstrap (${{ matrix.line }} ${{ matrix.version }}, ${{ matrix.kind }})"
     needs: [publish]
     runs-on: ubuntu-latest
     container:
@@ -435,16 +435,38 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # One cell per published keyring source, not one per format. The
+          # package each source carries bakes `Suites:` / the version into what
+          # it writes on the consumer, so a source built for the wrong
+          # distribution installs and refreshes perfectly well - against the
+          # wrong repository. Only running the cell on the distribution the
+          # artefact names can see that, and every published artefact is
+          # therefore covered.
           # deb: the archive-keyring package configures both repositories.
-          - { fmt: deb-keyring,     line: debian, image: "debian:sid",               script: "consume-keyring-package.sh",      version: sid }
-          # And the two halves of the keyring source on its own, before the
-          # package exists to install.
-          - { fmt: deb-keyring-src, line: debian, image: "debian:sid",               script: "consume-apt-keyring.sh",          version: sid }
-          # rpm: one bootstrap stanza, then the *-release package; two cells
-          # because dnf5 and dnf4 disagree about what re-roots and where caches
-          # land, and one verifier per family is the assumption that costs.
-          - { fmt: rpm-keyring-dnf5, line: fedora, image: "fedora:44",                script: "consume-dnf-keyring-package.sh",  version: 44 }
-          - { fmt: rpm-keyring-dnf4, line: rocky,  image: "rockylinux/rockylinux:10", script: "consume-dnf-keyring-package.sh",  version: 10 }
+          - { kind: install, line: debian, version: trixie,   image: "debian:trixie",            script: "consume-keyring-package.sh" }
+          - { kind: install, line: debian, version: forky,    image: "debian:forky",             script: "consume-keyring-package.sh" }
+          - { kind: install, line: debian, version: sid,      image: "debian:sid",               script: "consume-keyring-package.sh" }
+          - { kind: install, line: ubuntu, version: resolute, image: "ubuntu:resolute",          script: "consume-keyring-package.sh" }
+          - { kind: install, line: ubuntu, version: stonking, image: "ubuntu:stonking",          script: "consume-keyring-package.sh" }
+          # And the keyring source on its own, before the package exists to
+          # install - the half that asserts the signer really is the root key.
+          - { kind: source,  line: debian, version: trixie,   image: "debian:trixie",            script: "consume-apt-keyring.sh" }
+          - { kind: source,  line: debian, version: forky,    image: "debian:forky",             script: "consume-apt-keyring.sh" }
+          - { kind: source,  line: debian, version: sid,      image: "debian:sid",               script: "consume-apt-keyring.sh" }
+          - { kind: source,  line: ubuntu, version: resolute, image: "ubuntu:resolute",          script: "consume-apt-keyring.sh" }
+          - { kind: source,  line: ubuntu, version: stonking, image: "ubuntu:stonking",          script: "consume-apt-keyring.sh" }
+          # rpm: one bootstrap stanza, then the *-release package. One cell per
+          # line-and-version, since the package name and the repo file it ships
+          # both name a single version. Both dnf generations are covered by the
+          # lines themselves - fedora is dnf5, rocky and alma are dnf4 - rather
+          # than by a third axis, because dnf5 and dnf4 disagree about what
+          # re-roots and where caches land, and a version verified on only one
+          # of them is an assumption.
+          - { kind: install, line: fedora, version: 44,      image: "fedora:44",                script: "consume-dnf-keyring-package.sh" }
+          - { kind: install, line: fedora, version: 45,      image: "fedora:45",                script: "consume-dnf-keyring-package.sh" }
+          - { kind: install, line: fedora, version: rawhide, image: "fedora:rawhide",           script: "consume-dnf-keyring-package.sh" }
+          - { kind: install, line: rocky,  version: 10,      image: "rockylinux/rockylinux:10", script: "consume-dnf-keyring-package.sh" }
+          - { kind: install, line: alma,   version: 10,      image: "almalinux:10",             script: "consume-dnf-keyring-package.sh" }
     steps:
       - uses: actions/checkout@v7
       - name: Confirm no secret is reachable (a consumer's position)

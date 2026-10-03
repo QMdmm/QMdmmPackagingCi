@@ -1,37 +1,45 @@
 #!/usr/bin/env bash
 #
-# Stage B for the part of the scheme that is not a day-to-day repository: the
-# root-signed keyring source, and the fixture that proves revocation bites.
+# Stage B for the half of the scheme that is not a day-to-day repository: the
+# root-signed keyring source.
 #
-# This is a single cell rather than a row in the twelve-row matrix, because both
-# directories are produced on a trusted machine (the root secret never enters a
-# workflow), so there is one of each regardless of how many lines exist.
+# One cell per deb suite. The keyring source is per suite - the package it
+# carries bakes `Suites:` into the consumer's sources.list.d - so a source
+# serving the wrong suite is a *wrong* answer rather than a missing one, and the
+# only way to see that is to look at each suite's own directory. Installing the
+# package the source carries is consume-keyring-package.sh's half, one cell per
+# suite as well.
 #
-#   env: PAGES, ROOT_FPR, EXPECT_SHA
+#   env: PAGES, LINE, VERSION, ROOT_FPR, EXPECT_SHA
 #
-# What is checked:
-#   A. the keyring source verifies under the ROOT public key alone, and the
-#      signer really is the root key - not a subkey that happens to be in the
-#      same file. That is the whole point of the keyring source existing as its
-#      own repository: it is the one thing only the root key may sign.
-#   B. the fixture signed by the subkey that was later revoked is reported as
-#      signed by a REVOKED key, not silently accepted.
+# What is checked: the keyring source verifies under the ROOT public key alone,
+# and the signer really is the root key - not a subkey that happens to be in the
+# same file. That is the whole point of the keyring source existing as its own
+# repository: it is the one thing only the root key may sign.
 #
-# B is written against `--status-fd` on purpose. FINDINGS.md 3.1: `gpg --verify`
-# prints "Good signature" and exits 0 for a revoked signer, adding only a
-# WARNING line, so any assertion built on its exit code or on grepping "Good
-# signature" would pass on exactly the input it is meant to catch. The status
-# stream says REVKEYSIG / KEYREVOKED, and that is what gets asserted here.
+# The assertion reads `--status-fd`, never the exit code, because FINDINGS.md
+# 3.1 measured what the exit code is worth: `gpg --verify` prints "Good
+# signature" and exits 0 for a signer whose key was revoked, adding only a
+# WARNING line - so anything built on the exit code passes on exactly the input
+# it exists to catch.
+#
+# The lab's copy of this script carried a second half - a fixture signed by a
+# subkey that was later revoked, asserted to come back REVKEYSIG rather than
+# GOODSIG. That fixture is not here, and cannot be: it is a reading about an
+# incident, it needs a revoked subkey to exist, and a release has none. This
+# workflow is a publisher, not a rehearsal of a compromise; the lab is where
+# that belongs.
 set -euo pipefail
 
 PAGES="${PAGES:?}"; ROOT_FPR="${ROOT_FPR:?}"; EXPECT_SHA="${EXPECT_SHA:?}"
+LINE="${LINE:?}"; VERSION="${VERSION:?}"
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
-mkdir -p "$W/keys" "$W/keyring" "$W/revoked"
+mkdir -p "$W/keys" "$W/keyring"
 source "$(dirname "$0")/lib-site.sh"
 
 ROOT_KEYID="${ROOT_FPR: -16}"
 
-echo "=== B/keyring (root-signed source + revoked fixture) ==="
+echo "=== B/keyring (the root-signed source) $LINE $VERSION ==="
 echo "  $(os_name)"
 
 echo
@@ -54,16 +62,15 @@ wait_for_publish "$PAGES" "$EXPECT_SHA"
 echo
 echo "--- keys, from Pages only ---"
 fetch "$PAGES/keys/qmdmm-root.gpg"           "$W/keys/root.gpg"
-fetch "$PAGES/keys/debian/qmdmm-packages.gpg" "$W/keys/packages.gpg"
+fetch "$PAGES/keys/$LINE/qmdmm-packages.gpg" "$W/keys/packages.gpg"
 [ "$(key_fpr "$W/keys/root.gpg")" = "$ROOT_FPR" ] \
   || { echo "  !! the root key file is not $ROOT_FPR"; exit 1; }
 echo "  root file:     $(count_subkeys "$W/keys/root.gpg") subkey(s), as it must have"
-echo "  packages file: $(count_subkeys "$W/keys/packages.gpg") subkey(s), revoked one included"
+echo "  packages file: $(count_subkeys "$W/keys/packages.gpg") subkey(s)"
 
 echo
-echo "--- fetch both off-CI sources ---"
-fetch "$PAGES/debian-keyring/dists/sid/InRelease" "$W/keyring/InRelease"
-fetch "$PAGES/debian-revoked/dists/sid/InRelease"  "$W/revoked/InRelease"
+echo "--- fetch the off-CI source ---"
+fetch "$PAGES/$LINE-keyring/$VERSION/dists/$VERSION/InRelease" "$W/keyring/InRelease"
 
 echo
 echo "--- A) the keyring source, verified under the ROOT key alone ---"
@@ -81,23 +88,6 @@ echo "  signer: $signer   expected: $ROOT_KEYID"
 [ "$signer" = "$ROOT_KEYID" ] \
   || { echo "  !! the keyring source was signed by $signer, not by the root key"; exit 1; }
 echo "  OK: the keyring source is signed by the root key"
-
-echo
-echo "--- B) the fixture signed by a since-revoked subkey ---"
-# Same assertion style: the status stream, never the exit code.
-gpgv --keyring "$W/keys/packages.gpg" --status-fd 3 "$W/revoked/InRelease" \
-     3> "$W/status.b" 2> "$W/gpgv.b" || true
-sed 's/^/    /' "$W/gpgv.b"
-if grep -qE '^\[GNUPG:\] (REVKEYSIG|KEYREVOKED)' "$W/status.b"; then
-  grep -E '^\[GNUPG:\] (REVKEYSIG|KEYREVOKED|EXPKEYSIG)' "$W/status.b" | sed 's/^/    /'
-  echo "  OK: reported as signed by a revoked key, not accepted as good"
-elif grep -q '^\[GNUPG:\] GOODSIG ' "$W/status.b"; then
-  echo "  !! the verifier called this a GOOD signature - revocation was not seen"
-  sed 's/^/    /' "$W/status.b"; exit 1
-else
-  echo "  !! neither a good nor a revoked signature: the fixture may be broken"
-  sed 's/^/    /' "$W/status.b"; exit 1
-fi
 
 echo
 echo "=== B/keyring: PASS ==="
