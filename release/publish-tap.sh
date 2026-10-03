@@ -85,8 +85,21 @@ grep -qE "^[[:space:]]*root_url \"$PAGES/brew\"\$" "$W/qmdmm.rb" || {
 # is exactly how one macOS version stops being served without anyone noticing.
 block=$(sed -n '/^[[:space:]]*bottle do/,/^[[:space:]]*end/p' "$W/qmdmm.rb")
 [ -n "$block" ] || { echo "::error::the published formula has no bottle block:"; cat "$W/qmdmm.rb"; exit 1; }
+# The gap between a tag's colon and its checksum is `[[:space:]]+` and not one
+# space, because Homebrew's own writer lines the block's checksums up in a
+# column: the longest tag gets a single space and every shorter one is padded
+# out to match it -
+#
+#     sha256 cellar: :any, arm64_golden_gate: "218b..."
+#     sha256 cellar: :any, arm64_tahoe:       "91ad..."
+#
+# - so a pattern expecting one space reads the longest line and nothing else,
+# and this stage refuses a block it wrote itself. Which is what it did: the
+# reading below reported three lines and one pair on a real release. Any parser
+# of this block has to be indifferent to the padding; `ci/runtime-brew.sh` stops
+# at the colon for the same reason, and `ci/merge-brew.sh` compares with `\s+`.
 pairs=$(printf '%s\n' "$block" \
-  | sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, ([a-z0-9_]+): "([0-9a-f]{64})".*/\1 \2/p')
+  | sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, ([a-z0-9_]+):[[:space:]]+"([0-9a-f]{64})".*/\1 \2/p')
 count=$(printf '%s\n' "$pairs" | grep -c . || true)
 n_lines=$(printf '%s\n' "$block" | grep -cE '^[[:space:]]*sha256[[:space:]]+cellar:' || true)
 if [ "$n_lines" -lt 1 ]; then
