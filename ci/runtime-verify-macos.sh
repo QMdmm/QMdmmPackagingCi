@@ -338,10 +338,19 @@ fi
   # prefix and this script runs under `set -u`.
   #
   #   brew  the formula's prefix: its programs run out of $prefix/bin, so the
-  #         var/ they resolve is the one under the same prefix.
+  #         var/ they resolve is the one under the same prefix. That layout
+  #         keeps its own QMdmm name, the last component of the relative form.
   #   dmg   the identifier the bundle carries, me.fsu0413.QMdmm - the same
-  #         string as its CFBundleIdentifier - which is what names its var/
-  #         rather than a prefix it does not have.
+  #         string as its CFBundleIdentifier. The identifier names the
+  #         directory the bundle's etc/ and var/ sit under, so its var/ is
+  #         `<identifier>/var`: no further name follows it.
+  #
+  # Both answers are computed at run time rather than baked in when the project
+  # was configured. The recipe is QMdmmCore's Global::runtimeDataDirectory(),
+  # and doc/getting-started.md, section "Where the settings are stored", is the
+  # statement of where each layout lands. A candidate that stops matching one
+  # of them has been overtaken by a change in the main repository - which is
+  # what happened when the bundle's directories lost their trailing QMdmm.
   #
   # /usr/local/var/QMdmm/log used to be a third one. It was the default install
   # prefix baked into the binary at configure time; the same install now
@@ -349,7 +358,7 @@ fi
   # above whenever there is a prefix to resolve against at all. No face on this
   # line installs under /usr/local without having named its prefix, so it is
   # gone rather than left to be read as a layout this line still has.
-  for candidate in "${prefix:+$prefix/var/QMdmm/log}" "$HOME/Library/Application Support/me.fsu0413.QMdmm/var/QMdmm/log"; do
+  for candidate in "${prefix:+$prefix/var/QMdmm/log}" "$HOME/Library/Application Support/me.fsu0413.QMdmm/var/log"; do
     [ -n "$candidate" ] || continue
     [ -d "$candidate" ] || continue
     log=$(ls -1t "$candidate"/QMdmmServer-* 2>/dev/null | head -1)
