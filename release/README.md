@@ -4,9 +4,11 @@ The publishing half of this repository: the stages that turn a packaging run
 into a **signed, published** repository. `ci/` is the daily verification half and
 is untouched by any of this — a release reuses `ci/pack-*.sh`, `ci/runtime-*.sh`
 and `ci/dev-*.sh` exactly as the daily run does, and adds the stages below. The
-one stage this change added to `ci/` is `ci/merge-brew.sh`, which the daily run
-runs as well: a release reuses it for the same reason it reuses the other three,
-and the release is not the only place it is exercised.
+one stage this change added to `ci/` is `ci/merge-brew.sh`, and it belongs to the
+release line alone: the daily run has one Homebrew row, so the block that row
+writes names every bottle there is and stage B installs that formula as it
+stands. Three rows is where a block stops being something one row can write,
+which is the whole reason the merge stage exists.
 
 ## Where this came from
 
@@ -64,17 +66,21 @@ line below it. One row therefore answers "does the bottle work" for exactly one
 macOS, and `ci/pack-brew.sh` refuses a row whose runner is not the macOS it
 declares because nothing downstream could tell.
 
-No single row can write the formula's bottle block, which has one checksum per
-version: the row that bottled on 15 knows nothing about the other two. So the
-rows each produce a bottle plus the JSON describing it, and **`merge-brew`** -
-one job, after all of them - turns those JSONs into the block with Homebrew's own
-`brew bottle --merge` and refuses to merge if the rows are not the set the
-workflow declared, if all three did not pin the same source, or if the block's
-tags or order are not the ones expected. That order is behaviour rather than
-formatting (Homebrew walks the block in file order when it looks for a bottle for
-a macOS newer than every tag), so it is read back rather than assumed. The merge
-job runs on an arm64 macOS runner because the JSONs name their formula through
-Homebrew's repository layout.
+No single row can write the block the **published** formula carries, which has one
+checksum per version: the row that bottled on 15 knows nothing about the other
+two. Each row does write a block - the one naming the bottle it built, which is
+the whole block on the daily line's single row - and on this line those three
+one-line blocks are an intermediate state nothing publishes. **`merge-brew`** -
+one job, after all of them - turns the rows' JSONs into the one block with
+Homebrew's own `brew bottle --merge`, over one row's formula, and refuses to merge
+if the rows are not the set the workflow declared, if they did not pin the same
+source (compared with each row's own block taken off both sides, since that is
+the one part of the file rows are meant to differ in), or if the block's tags or
+order are not the ones expected. That order is behaviour rather than formatting
+(Homebrew walks the block in file order when it looks for a bottle for a macOS
+newer than every tag), so it is read back rather than assumed. The merge job runs
+on an arm64 macOS runner because the JSONs name their formula through Homebrew's
+repository layout.
 
 `merge-brew`'s output is the artifact the stages after it consume, under the name
 `pack-brew` - one directory holding every bottle this run built, the formula

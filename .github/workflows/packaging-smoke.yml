@@ -483,11 +483,12 @@ jobs:
   # macOS a bottle built today is actually for, which is what the block below
   # carries and what stages B and C then hold it to.
   #
-  # The merge job in between is not symmetry. The formula's bottle block is
-  # written by ci/merge-brew.sh and by nothing else now, so a line that skipped
-  # it would have no block for stage B to pour from - and running it daily is
-  # also what keeps that mechanism from being rehearsed only on the day a
-  # release is cut.
+  # This line has no merge stage, and the difference from the release line is
+  # the whole line rather than a shortcut: the block a row writes names the
+  # bottles it built, which here is every bottle there is, so stage A's formula
+  # is complete and stage B installs it as it stands. Three rows is the case
+  # where that stops being true - no row can write a block describing bottles it
+  # did not build - and that is what release.yml's merge-brew job is for.
   pack-brew:
     name: "A pack (${{ matrix.dist.name }})"
     runs-on: macos-latest
@@ -510,11 +511,11 @@ jobs:
 
       # The whole stage, in ci/pack-brew.sh: tap the repository that holds the
       # formula, re-derive its source pin for this run's ref, build and bottle
-      # through Homebrew's own commands, and collect this row's bottle, its JSON
-      # and the pinned formula. It writes no block - a block carries one checksum
-      # per macOS and this stage sees one bottle - so the formula comes out of
-      # the merge job below. The build type input does not reach this line: the
-      # formula pins Release itself, exactly as the Alpine line's recipe does.
+      # through Homebrew's own commands, write the bottle block back into the
+      # tap's copy of the formula, and collect the bottle plus that formula - the
+      # one stage B installs, block and all. The build type input does not reach
+      # this line: the formula pins Release itself, exactly as the Alpine line's
+      # recipe does.
       - name: This runner's bottle tag
         id: tag
         # Homebrew is the authority on what a bottle built here is called, so
@@ -540,65 +541,11 @@ jobs:
       - name: Upload packages
         uses: actions/upload-artifact@v7
         with:
-          # Named after this row's own tag, not the line's name: the merge job
-          # collects every row of the line by pattern, exactly as the release
-          # workflow does, so the row's name has to say which row it is.
-          name: packages-${{ matrix.dist.name }}-row
-          path: out
-          if-no-files-found: error
-
-  # The one job that can see every row of this line at once, and the only writer
-  # of the formula's bottle block. On this line there is one row, so the block
-  # it assembles carries one checksum - the shape is the release line's, run
-  # small. What it still asserts here is worth the job: that the row's pin is
-  # the recipe the tap ships apart from the pin, that the block's root_url is the
-  # address stage B will serve from, that the block's checksum is the JSON's own,
-  # and that a missing row is a named refusal rather than a block with a line
-  # fewer in it.
-  merge-brew:
-    name: "A merge (brew)"
-    needs: [pack-brew]
-    # `always()`, for the reason the release workflow gives: a row that failed
-    # should be reported as a missing row by this job's own count rather than by
-    # this job never running.
-    if: always() && !cancelled()
-    runs-on: macos-latest
-    steps:
-      - name: Checkout this harness
-        uses: actions/checkout@v7
-
-      - name: Download the rows
-        uses: actions/download-artifact@v8
-        with:
-          pattern: packages-brew-row*
-          path: rows
-
-      # The same reading the pack row takes, on the machine that is about to
-      # declare it: the row's tag travels in its manifest and this job has to say
-      # what it expects before it can notice that they disagree. Both jobs are
-      # `macos-latest`, so the two answers are the same machine's.
-      - name: This runner's bottle tag
-        id: tag
-        run: |
-          tag=$(brew ruby -e 'require "utils/bottles"; print Utils::Bottles.tag' 2>/dev/null)
-          test -n "$tag" || {
-            echo "::error::Homebrew named no bottle tag for this machine ($(uname -m), macOS $(sw_vers -productVersion))"
-            exit 1
-          }
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "this runner bottles as $tag ($(uname -m), macOS $(sw_vers -productVersion))"
-
-      - name: Assemble the formula's block from every row
-        env:
-          MACOS_TAGS: ${{ steps.tag.outputs.tag }}
-        run: ci/merge-brew.sh out rows/*
-
-      - name: Upload packages
-        uses: actions/upload-artifact@v7
-        with:
-          # The name stages B and C download, unchanged from when stage A wrote
-          # it directly: what travels on is the same thing, one stage later.
-          name: packages-brew
+          # The line's name rather than the row's: this line has one row, and
+          # stages B and C download this by the same name the release line's
+          # merged artifact carries, so what arrives under `pkgs/` is one shape
+          # on both lines.
+          name: packages-${{ matrix.dist.name }}
           path: out
           if-no-files-found: error
 
@@ -650,11 +597,9 @@ jobs:
     # that row", so those jobs are allowed to run and a row fails on its missing
     # artifact instead. Here the producing job *is* a job.
     #
-    # The artifact it waits for is the merge job's rather than stage A's, because
-    # the formula it installs has to carry the block - and that is written by
-    # ci/merge-brew.sh. The name is unchanged, so what arrives under `pkgs/` is
-    # the same layout it always was, one stage later.
-    needs: [merge-brew]
+    # The artifact it waits for is stage A's, which on this line is the whole
+    # line: one row, one bottle, and a formula whose block names that bottle.
+    needs: pack-brew
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -681,7 +626,7 @@ jobs:
       - name: Install coreutils (for gtimeout)
         run: brew install coreutils
 
-      # This row's own tag, read the same way the merge job read it. Both are
+      # This row's own tag, read the same way stage A read it. Both are
       # `macos-latest`, so the answer describes the machine about to pour - and
       # ci/runtime-brew.sh refuses a row whose declared tag is not in the block
       # rather than pouring whatever the block happens to list first.
@@ -800,7 +745,7 @@ jobs:
 
   verify-dev-brew:
     name: "C dev (${{ matrix.dist.name }})"
-    needs: [merge-brew]
+    needs: pack-brew
     runs-on: macos-latest
     strategy:
       fail-fast: false

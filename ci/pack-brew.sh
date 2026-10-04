@@ -2,16 +2,22 @@
 #
 # Stage A for the Homebrew line, one row per macOS: tap the repository that
 # holds the formula, re-derive its source pin for the ref this run was given,
-# install it from source with --build-bottle, and bottle it.
+# install it from source with --build-bottle, bottle it, write the bottle block
+# back into the tap's copy of the formula, and collect the bottle and that
+# formula.
 #
-# What a row produces is one bottle, the JSON that describes it (which is what
-# the merge stage consumes and nothing else does), the pinned formula, and a
-# manifest naming this row's own tag. It deliberately writes NO bottle block:
-# a block carries one checksum per macOS version and the formula a user gets
-# carries all of them, so the block is assembled once, from every row's JSON,
-# by ci/merge-brew.sh. A row that merged its own would be writing a formula
-# whose block says "this bottle, on this macOS" - which is the one thing a
-# single row knows and the one thing the published recipe must not say.
+# What a row produces is one bottle, the JSON that describes it, a formula whose
+# block names this row's own bottle, and a manifest naming this row's own tag.
+#
+# A row's block names the bottles *it* built and no others, which is the whole
+# block on a line with one row - and that is why this stage writes it: the daily
+# line runs one row and has no stage between A and the row that pours, so the
+# formula stage B installs has to be the one this row completed. On the release
+# line there are three rows, each of which writes its own one-line block for a
+# formula nobody publishes, and ci/merge-brew.sh replaces all three with one
+# block carrying every row's checksum. So the block that reaches a user is
+# written once, from the JSONs, by the merge stage - and what a row writes on a
+# multi-row line is a step in that, not the thing itself.
 #
 # There is no `base-image-brew.sh` behind this: the macOS runner image already
 # has Homebrew, git, cmake and ninja, and Qt is *not* in it (the toolset's
@@ -194,6 +200,40 @@ brew install --build-bottle "$HOMEBREW_TAP/qmdmm"
 brew bottle --json --no-rebuild --root-url "$BOTTLE_ROOT_URL" "$HOMEBREW_TAP/qmdmm"
 ls -l ./*.bottle.*
 
+# Writing the block back into the tap's copy is what makes this row's formula the
+# one carrying a real checksum: the recipe the tap ships either has no block at
+# all or has the previous release's, and neither names the bottle built above.
+# `--write` replaces a block rather than adding to one - read off the tap itself,
+# whose formula still carried the previous release's block when the last release
+# ran and came out of this call with exactly the new one. `--no-commit` because
+# the tap's git state is not this stage's business: the authenticated copy of the
+# formula travels on as an artifact instead, and release/publish-tap.sh is the
+# one place that commits to the tap.
+#
+# On a multi-row line this is that line's intermediate state rather than its
+# answer - ci/merge-brew.sh installs one row's formula and merges every row's
+# JSON over it, replacing this block with one that carries all of them.
+brew bottle --merge --write --no-commit ./*.bottle.json
+
+# The block is read back rather than trusted, and the reading is exact: this row
+# built one bottle on one macOS, so the block it just wrote has to name that tag
+# and no other. A block naming a tag this runner cannot pour is a formula whose
+# pour falls back to a source build - green everywhere, and not the bottle this
+# row made. The old spelling of this check anchored on the block's own
+# indentation and matched nothing, which is why the pattern here names the *lines*
+# it wants rather than the block they sit in.
+if ! grep -q '^  bottle do' "$formula"; then
+  echo "::error::no bottle block was written into the tap's formula ($formula). The JSON is there, so the merge ran; what is missing is its effect on this file. $formula as it stands:"
+  sed -n '/^  bottle do/,/^  end/p' "$formula"
+  exit 1
+fi
+block_tags=$(sed -nE 's/^[[:space:]]*sha256[[:space:]]+cellar: [^,]*, ([a-z0-9_]+):[[:space:]]+".*/\1/p' "$formula")
+if [ "$block_tags" != "$MACOS_TAG" ]; then
+  echo "::error::the block this row wrote lists '$block_tags', expected exactly '$MACOS_TAG'. The stage above merged this row's own JSON and nothing else, so a block naming another tag - or two of them - is a block this row did not write. The block in $formula:"
+  sed -n '/^  bottle do/,/^  end/p' "$formula"
+  exit 1
+fi
+
 mkdir -p out/bottles
 # Matched by the widest shape `brew bottle` can write - `…bottle.tar.gz` and
 # `…bottle.<rebuild>.tar.gz` - and not by the shape this run expects, so that a
@@ -254,7 +294,7 @@ esac
 # the message would read 1 when the answer is 0.
 n_json=$(ls -1 ./*.bottle*.json 2>/dev/null | grep -c . || true)
 if [ "$n_json" -ne 1 ]; then
-  echo "::error::expected one bottle JSON beside the bottle, found $n_json. The merge stage reads this file and nothing else for this row's checksum. What is here: $(ls -A . | tr '\n' ' ')"
+  echo "::error::expected one bottle JSON beside the bottle, found $n_json. Every write of this bottle's checksum into a formula - this row's own block, and the merged block on the release line - comes out of this file, so there is nothing to read. What is here: $(ls -A . | tr '\n' ' ')"
   exit 1
 fi
 json=$(ls -1 ./*.bottle*.json)
@@ -267,24 +307,26 @@ for formula in d.values():
         print(tag, t["sha256"])
 ' "$json")
 if [ "$json_sha" != "$MACOS_TAG $(shasum -a 256 "$1" | awk '{print $1}')" ]; then
-  echo "::error::the JSON and the bottle disagree about what was built. JSON says '$json_sha'; the file hashes to '$MACOS_TAG $(shasum -a 256 "$1" | awk '{print $1}')'. The merge stage writes the block from the JSON, so a block built from these two would name a checksum no download could match."
+  echo "::error::the JSON and the bottle disagree about what was built. JSON says '$json_sha'; the file hashes to '$MACOS_TAG $(shasum -a 256 "$1" | awk '{print $1}')'. The JSON is what the block is written from, so a block built from these two would name a checksum no download could match."
   exit 1
 fi
 
 cp "$1" "out/bottles/$poured"
 cp "$json" "out/bottles/${poured%.tar.gz}.json"
-# The pinned formula travels with the row - not for its block, which is the
-# merge stage's to write, but as the reading that all rows pinned the same
-# source. merge-brew.sh compares the three byte for byte; three rows that
-# disagree about the url, the sha256 or the version would be three bottles of
-# three different things wearing one version number.
-cp "$formula" out/qmdmm.pinned.rb
+# The formula travels with the row under the name every later stage reads, and
+# stage B installs it as the tap's own - so it has to be complete, which on this
+# line it is. On the release line merge-brew.sh reads it as well, for the other
+# half of what it is: the reading that all three rows pinned the same source. The
+# comparison is made with the block taken off both sides, because the block is
+# the one part of the file that is each row's own.
+cp "$formula" out/qmdmm.rb
 
 printf 'package\tversion\ttag\tfile\n' > out/MANIFEST.tsv
 printf 'qmdmm\t%s\t%s\t%s\n' "$version" "$MACOS_TAG" "$poured" >> out/MANIFEST.tsv
-# A header with no row under it is a manifest the merge stage reads as "this row
-# built nothing", and it would then be merged as a two-row block. Both are
-# silent; this is not.
+# A header with no row under it is a manifest every later stage reads as "this
+# row built nothing": stage B looks the bottle up by tag and finds none, and the
+# merge stage would take this row for a row of its own. Both are silent; this is
+# not.
 if [ "$(awk 'NR > 1 { n++ } END { print n + 0 }' out/MANIFEST.tsv)" -ne 1 ]; then
   echo "::error::the manifest lists no bottle for this row. out/bottles holds: $(ls -A out/bottles 2>&1)"
   exit 1
@@ -300,11 +342,12 @@ fi
   echo "Tag \`$MACOS_TAG\` is this runner's own macOS version, which is the"
   echo 'compatibility floor: a macOS older than this one cannot pour it, and a'
   echo 'newer one pours it only because the block lists it as the newest'
-  echo 'compatible below that system. That is why the workflow runs one row per'
-  echo 'supported macOS, and why the block the merge stage assembles has to'
+  echo 'compatible below that system. That is why the release workflow runs one'
+  echo 'row per supported macOS, and why a block that is to serve them all has to'
   echo 'carry every row.'
   echo
-  echo 'This row writes no block of its own; the formula it carries still has'
-  echo 'whatever the tap ships, and merge-brew.sh replaces it with one that'
-  echo 'lists every row of this run.'
+  echo 'The block this row wrote names \`'"$MACOS_TAG"'\` and nothing else, which is'
+  echo 'the whole block on the daily line - there this formula is the one stage B'
+  echo 'installs. On the release line the three rows each write their own and'
+  echo 'merge-brew.sh replaces all three with one carrying every row of the run.'
 } >> "$GITHUB_STEP_SUMMARY"

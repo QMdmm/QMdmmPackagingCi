@@ -42,10 +42,12 @@ brew tap "$HOMEBREW_TAP"
 brew trust --tap "$HOMEBREW_TAP"
 tap_dir=$(brew --repo "$HOMEBREW_TAP")
 
-# The merged formula rather than the tap's own: it is the one carrying the block
-# with every row's checksum in it - assembled from all of this run's bottles by
-# ci/merge-brew.sh - and the block's root_url is the loopback address served two
-# steps below.
+# This run's formula rather than the tap's own: it is the one carrying the block
+# naming this run's bottles, and the block's root_url is the loopback address
+# served two steps below. Which stage wrote it depends on the line - stage A's is
+# the whole block on the daily line's single row, while the release line's three
+# rows have their blocks assembled into one by ci/merge-brew.sh - and this stage
+# does not care which, only that the block names the bottle it is about to pour.
 test -f pkgs/qmdmm.rb
 install -m 644 pkgs/qmdmm.rb "$tap_dir/Formula/qmdmm.rb"
 grep -A6 '^  bottle do' "$tap_dir/Formula/qmdmm.rb"
