@@ -236,9 +236,10 @@ repository settings hold the private half of each.
   half, copied into the consuming container's `/etc/apk/keys/` by stages B and C.
   Nothing it signs is published, so no consumer is ever told to trust it.
 * `packaging/alpine/qmdmm-release-6abe2dbc.rsa.pub` — the **release** key's public
-  half, and the only one a consumer of a published repository should have in
-  `/etc/apk/keys/`. The release workflow is not written yet; when it is, this is
-  the file it points at.
+  half, and the one a consumer of a published apk repository would have to have in
+  `/etc/apk/keys/`. There is no such repository: `release.yml` (see
+  `release/README.md`) publishes the deb, rpm and pac lines and has no apk row, so
+  the daily key above is the only one anything is signed with today.
 * the `PACKAGER_PRIVKEY` secret, at repository level — the daily key's private
   half, written to `~builder/.abuild/qmdmm-daily-6abe0b34.rsa` in stage A, and
   nowhere else. Stage A hands it over on that line's row only: the environment
