@@ -104,7 +104,9 @@ on:
           - Debug
   schedule:
     # GitHub's cron scheduler has no timezone setting and always reads UTC, so
-    # the intended hour is written into the field as 00:00 UTC (08:00 UTC+8).
+    # the field is written as a UTC time: the run should land at 08:00 UTC+8
+    # (00:00 UTC), and the field currently sits an hour earlier to offset the
+    # lateness described below.
     # Scheduled runs have no inputs at all, which is what the QMDMM_REF /
     # QMDMM_BUILD_TYPE defaults below exist for.
     #
@@ -131,7 +133,7 @@ on:
     # landed 5m48s apart. The field is therefore a dial - if runs keep drifting
     # later, move it an hour earlier to compensate - and not a promise of a
     # clock time. No further field experiments are being run.
-    - cron: '0 0 * * *'
+    - cron: '0 23 * * *'
 
 permissions:
   contents: read

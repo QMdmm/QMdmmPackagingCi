@@ -422,7 +422,7 @@ silently run the other slice and duplicate its neighbour.
 Daily, on a schedule: the whole suite re-runs against `main` and `Release` — the
 four containers and the macOS jobs — so a packaging regression surfaces within a
 day rather than at the next release. The
-`cron` field reads `0 0 * * *`, but the field is not when the runs start:
+`cron` field reads `0 23 * * *`, but the field is not when the runs start:
 GitHub's scheduler has no timezone setting and launches scheduled runs hours
 after the trigger it was given. That lateness is stable per cron value but not
 derivable from it (four runs measured: 3h20m to 5h41m late), so the field is
