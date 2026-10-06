@@ -1,6 +1,8 @@
 # QMdmmPackagingCi
 
 Container-based packaging verification for [QMdmm/QMdmm](https://github.com/QMdmm/QMdmm).
+`AGENTS.md` is this file's companion: where things are, what else moves when one
+thing moves, and what must not be touched.
 
 This repository holds no product code. It exists to answer three questions about
 every distribution QMdmm claims to support, using that distribution's own
