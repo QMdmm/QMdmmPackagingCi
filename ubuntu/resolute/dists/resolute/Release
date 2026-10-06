@@ -2,13 +2,13 @@ Origin: QMdmm
 Label: QMdmm
 Suite: resolute
 Codename: resolute
-Date: Sat, 03 Oct 2026 14:30:21 UTC
+Date: Tue, 06 Oct 2026 08:43:40 UTC
 Architectures: all
 Components: main
 Description: QMdmm ubuntu resolute repository
 MD5Sum:
- 1bb9c551c7acab2dfea0b7402f5f815c             1940 main/binary-all/Packages
- 0d0a35642611b8c96783a82d2c113d97              727 main/binary-all/Packages.gz
+ 344e5ba98e153f97c75d89cd627e8806             1940 main/binary-all/Packages
+ 3f5be2cd6aaacd56b4f593bca2bd5fe9              721 main/binary-all/Packages.gz
 SHA256:
- 5cc7efc8e9e52da6520e64afa4a6594ae67d1eecda7e540bfba34b657aa69038             1940 main/binary-all/Packages
- 67cc064dd19d02f7432749e857670956626f0af8e9433dc4f85f02d0ec1730a9              727 main/binary-all/Packages.gz
+ 4f2ea44e6e95c9ccd20c5de65411925d9c35d4daaa3e7fa2c3def60a14b03984             1940 main/binary-all/Packages
+ 8d4384899f8fe8048a80b20d8631eb3904bfbfa2ef57be0f7ce5d18943e7eba5              721 main/binary-all/Packages.gz

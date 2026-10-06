@@ -3,16 +3,18 @@
 # copy, so what a user installs and what the harness verifies is the same
 # recipe.
 #
-# There is no bottle block here. `brew bottle --merge --write` adds one, and
-# the harness adds it to its own working copy inside the tap directory - never
-# to this file, because a bottle records one exact build on one exact macOS
-# version and this repository should only learn about one when a release is
-# cut. A user installing today therefore builds from source, which is what the
+# The bottle block below is written by the release line rather than by hand:
+# stage A bottles the tag on each macOS the release supports, and
+# `release/publish-tap.sh` merges their checksums into this file and pushes it
+# here - so this repository learns about a bottle when a release is cut, and not
+# before. A bottle records one exact build on one exact macOS version, and the
+# block carries one line per version: an install on a macOS the block names
+# pours that bottle, and anywhere else falls back to the source tarball the
 # urls below describe.
 #
 # When the harness packages a ref that is not a tag - which is what the daily
 # run does, since it packages `main` - it rewrites `url`, `sha256` and
-# `version` in that working copy. A branch or a commit has no tag tarball, so
+# `version` in the copy it tapped. A branch or a commit has no tag tarball, so
 # the url becomes .../archive/<full-sha>.tar.gz and the version, normally
 # detected from the url, has to be read out of the source tree and stated
 # instead. The values committed here pin the tag that was verified locally: tag
@@ -51,16 +53,16 @@
 class Qmdmm < Formula
   desc "Multiplayer card game server, bots and client"
   homepage "https://github.com/QMdmm/QMdmm"
-  url "https://github.com/QMdmm/QMdmm/archive/refs/tags/0.0.1.tar.gz"
-  sha256 "2fe4085ca4ccd179f04321bfa4317a47f81cd6eb470d3a791db06b5b9f5a60d5"
+  url "https://github.com/QMdmm/QMdmm/archive/refs/tags/0.0.2.tar.gz"
+  sha256 "13c8b74dd6ea8cf3b7985230a6e97a733fa48aa6b7ef4734ad1c140ce2a62732"
   license "AGPL-3.0-or-later"
   head "https://github.com/QMdmm/QMdmm.git", branch: "main"
 
   bottle do
     root_url "https://qmdmm.github.io/QMdmmPackagingCi/brew"
-    sha256 cellar: :any, arm64_golden_gate: "81f55d7f3cdce5ef50723f10851258efa469784dd1943fcee04e6283efce1674"
-    sha256 cellar: :any, arm64_tahoe:       "05af0876e6106a6a8608e82d3ef92fd8675cc02ac644f840d37e96bea3e15017"
-    sha256 cellar: :any, arm64_sequoia:     "1bb297f36443eb86a0023958438526ab1708443624e880fb5553632e9fb61a1b"
+    sha256 cellar: :any, arm64_golden_gate: "02a1a33f58f85deecd3ba9f5a9dad3378592c01ea148780ac3d5c210adbf2227"
+    sha256 cellar: :any, arm64_tahoe:       "ad16fc593fbf23808bfed19b353b8f39bee6a336d4aa9263dd3db193d92f7998"
+    sha256 cellar: :any, arm64_sequoia:     "f2bc8a5dcfb1de32bbbc504ca26ef95909303a291ffe23b190224e941761f4f5"
   end
 
   depends_on "cmake" => :build

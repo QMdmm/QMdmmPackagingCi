@@ -5,12 +5,12 @@ Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
 Package: qmdmm-6
 Priority: optional
 Section: devel
-Version: 0.0.1
-Installed-Size: 4447
-Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-6.deb
-Size: 987690
-MD5sum: 38639a706c570c9e415a6276c51f3e1e
-SHA256: 4839f2bad31c78317a380a3116b30d05d33c489d50e4d9081d73c1fd7e65389b
+Version: 0.0.2
+Installed-Size: 4469
+Filename: pool/main/q/qmdmm/QMdmm-0.0.2-Linux-6.deb
+Size: 993434
+MD5sum: b42f889df73e6195dfa0ac9a5c56cb8f
+SHA256: d86678c342b04e10c784b60f2156d0a10e44019f2ae4c7da4864cec4f0261da5
 
 Architecture: amd64
 Description: A game which is played in primary / high school
@@ -18,38 +18,38 @@ Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
 Package: qmdmm-common-dev
 Priority: optional
 Section: devel
-Version: 0.0.1
+Version: 0.0.2
 Installed-Size: 57
-Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-dev-common.deb
-Size: 10848
-MD5sum: bf9df10dcbfee9a29f86c7135327b5b8
-SHA256: fc990b7db1b38d672ce29888fa6ea20dee2a184ec472aaad0747129c7225b7b9
+Filename: pool/main/q/qmdmm/QMdmm-0.0.2-Linux-dev-common.deb
+Size: 11138
+MD5sum: 161e6f85b3986f625010bb695ed00c6f
+SHA256: e62b6905d9de0b4976cb252a2605c348f056a8d6b8866d1099180f65d67852f9
 
 Architecture: amd64
-Depends: qmdmm-common-dev (= 0.0.1), qmdmm-6 (= 0.0.1), qt6-base-dev, qt6-declarative-dev, qt6-websockets-dev, qt6-tools-dev, cmake
+Depends: qmdmm-common-dev (= 0.0.2), qmdmm-6 (= 0.0.2), qt6-base-dev, qt6-declarative-dev, qt6-websockets-dev, qt6-tools-dev, cmake
 Description: A game which is played in primary / high school
 Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
 Package: qmdmm-6-dev
 Priority: optional
 Section: devel
-Version: 0.0.1
+Version: 0.0.2
 Installed-Size: 36
-Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-dev6.deb
-Size: 5992
-MD5sum: 73bd09abcc779f29791854101047cd1d
-SHA256: 609b433776f7d6e09794e103813928c75f03d36bfa6ac10480aa2ca22a0fc89d
+Filename: pool/main/q/qmdmm/QMdmm-0.0.2-Linux-dev6.deb
+Size: 5996
+MD5sum: 816f239bd818619c7ac94a25f7a4765d
+SHA256: da2bd9c67c5d00df17b1bb1e87d245176c5a3703825054e1e3b799ec3ea00998
 
 Architecture: amd64
-Depends: qmdmm-common-dev (= 0.0.1)
+Depends: qmdmm-common-dev (= 0.0.2)
 Description: A game which is played in primary / high school
 Maintainer: Neve M. Nguyen <nemn9852@agent.qq.com>
 Package: qmdmm-doc
 Priority: optional
 Section: devel
-Version: 0.0.1
-Installed-Size: 5239
-Filename: pool/main/q/qmdmm/QMdmm-0.0.1-Linux-doc.deb
-Size: 1743774
-MD5sum: 7468e2904ec21193706a9504b4ae2f24
-SHA256: 4e29266347b076996c7950eb8c3a9dcd955db6e91fc5239832b1b89504cfa804
+Version: 0.0.2
+Installed-Size: 5286
+Filename: pool/main/q/qmdmm/QMdmm-0.0.2-Linux-doc.deb
+Size: 1757708
+MD5sum: 65d1296f7693589793978aa7d13753c3
+SHA256: 3b3d5a43886606b79225e2f208c98084c050bad5f71e505d9d04f7bc16877e1a
 

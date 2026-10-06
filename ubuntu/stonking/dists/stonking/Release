@@ -2,13 +2,13 @@ Origin: QMdmm
 Label: QMdmm
 Suite: stonking
 Codename: stonking
-Date: Sat, 03 Oct 2026 14:30:15 UTC
+Date: Tue, 06 Oct 2026 08:43:37 UTC
 Architectures: all
 Components: main
 Description: QMdmm ubuntu stonking repository
 MD5Sum:
- 6927dcff111b515cdca518b4bcedb905             1940 main/binary-all/Packages
- b84c808291588bbe17912dfa3dc5b6c3              722 main/binary-all/Packages.gz
+ ad089ffe3e71d4607140687008528630             1940 main/binary-all/Packages
+ a56859f91ee630a11da3aee0a96602fc              724 main/binary-all/Packages.gz
 SHA256:
- c7bce53ad8d8f94dbbbdc75a20c221f3d379cc6a0a6ba1a7919f1d259f09e6dd             1940 main/binary-all/Packages
- 3eacc034b6bbaa53befa1e8fd7da54e6f91503d3ad0c70de435002c6a163588c              722 main/binary-all/Packages.gz
+ 103f19ee41ca6375e4dccc8c01af1463896a81a0ef518735c23ae729f57deedb             1940 main/binary-all/Packages
+ f0ff1bebaff972d4d0aba84dc8d81bc1038cbe5ff2795f21fbd2a266abd49718              724 main/binary-all/Packages.gz
