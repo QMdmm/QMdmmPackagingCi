@@ -892,9 +892,11 @@ jobs:
           # the line's shape rather than a shortcut: abuild signs the index
           # inside stage A, so what pack-apk uploaded already is the published
           # repository. It gets its own loop instead of being folded into the one
-          # above because the two come from different jobs and their names carry
-          # a different shape - `pack-apk-<version>` names no line, and the line
-          # it belongs to is the one this workflow says it is.
+          # above because the two come from different jobs and carry different
+          # names - stage S's are `repo-<line>-<version>`, and these are
+          # `pack-<line>-<version>`, the same name the verify and consumer rows
+          # address them by. That name is the artifact's, and the line in it is
+          # read out of release/lines.tsv below rather than assumed here.
           #
           # What is copied is the artifact's contents, which is the repository
           # root: the index sits one level down, under the architecture
@@ -902,16 +904,20 @@ jobs:
           # `/<arch>/APKINDEX.tar.gz` to whatever a consumer names. MANIFEST.tsv
           # travels with the artifact and is dropped here: it is this harness's
           # own bookkeeping and not a file any apk will ask a repository for.
+          apk_lines=$(awk -F'\t' 'NR>1 && $2 == "apk" { print $1 }' release/lines.tsv | sort -u)
+          [ -n "$apk_lines" ] || { echo "!! release/lines.tsv names no apk line"; exit 1; }
           m=0
-          for d in artifacts/pack-apk-*; do
-            aver="${d#artifacts/pack-apk-}"
-            [ -n "$aver" ] || { echo "!! cannot read an Alpine version out of '$d'"; exit 1; }
-            rm -rf "_site/alpine/$aver"
-            mkdir -p "_site/alpine/$aver"
-            cp -r "$d/." "_site/alpine/$aver/"
-            rm -f "_site/alpine/$aver/MANIFEST.tsv"
-            echo "  pack-apk-$aver -> alpine/$aver  ($(find "$d" -type f | wc -l | tr -d ' ') files)"
-            m=$((m+1))
+          for line in $apk_lines; do
+            for d in "artifacts/pack-$line-"*; do
+              aver="${d#artifacts/pack-$line-}"
+              [ -n "$aver" ] || { echo "!! cannot read a version out of '$d'"; exit 1; }
+              rm -rf "_site/$line/$aver"
+              mkdir -p "_site/$line/$aver"
+              cp -r "$d/." "_site/$line/$aver/"
+              rm -f "_site/$line/$aver/MANIFEST.tsv"
+              echo "  pack-$line-$aver -> $line/$aver  ($(find "$d" -type f | wc -l | tr -d ' ') files)"
+              m=$((m+1))
+            done
           done
           echo "  $m Alpine repository/repositories staged"
           [ "$m" -ge 1 ] || { echo "!! no Alpine repository to publish"; exit 1; }
