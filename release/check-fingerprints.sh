@@ -14,6 +14,18 @@
 # come from release/lines.tsv - the lab's one list of lines - so a new line cannot
 # show up in one place and not the other without this failing.
 #
+# One line is named in the output and not compared, and it is the one whose key
+# is not an OpenPGP key. The Alpine line's is an RSA pair whose identity is the
+# FILE NAME apk looks for in /etc/apk/keys, so there is no fingerprint for the
+# file above to list and no subkey file for this one to read. What a consumer
+# reads for that line is sha256 of the key's DER public half, and the publish job
+# derives it from the key file as it writes the page - so unlike the rows below
+# there is no stored copy of it that could drift from the key. It is printed and
+# not dropped: a line that leaves a gate without saying so is how the gate
+# quietly stops covering what its name says. The claim that line does need - the
+# key the site serves is the key this repository commits - is asserted where a
+# consumer can see it, in release/consume-apk.sh.
+#
 # Exit status is the verdict; the lines it prints say which line disagreed.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -33,10 +45,17 @@ live_sub() {  # live_sub <key-file>
     | awk -F: '/^pub:/{f=0} /^sub:/{s=$2;f=1} /^fpr:/{if(f && s !~ /^[redi]$/){print $10; exit}}'
 }
 
-mapfile -t lines < <(awk -F'\t' 'NR>1{print $1}' release/lines.tsv | sort -u)
-[ "${#lines[@]}" -ge 1 ] || { echo "!! release/lines.tsv lists no lines"; exit 1; }
+# The lines whose trust material is a key file this gate can compare. `fmt` is
+# the column that decides it, and apk is the one format whose keys are not
+# OpenPGP - see the paragraph above.
+mapfile -t apk_lines < <(awk -F'\t' 'NR>1 && $2 == "apk" {print $1}' release/lines.tsv | sort -u)
+mapfile -t lines < <(awk -F'\t' 'NR>1 && $2 != "apk" {print $1}' release/lines.tsv | sort -u)
+[ "${#lines[@]}" -ge 1 ] || { echo "!! release/lines.tsv lists no OpenPGP line"; exit 1; }
 
 echo "=== keys/fingerprints.txt vs the committed key files ==="
+for line in "${apk_lines[@]}"; do
+  echo "  $line: not an OpenPGP line, so it has no row here (see this script's header)"
+done
 fail=0
 for line in "${lines[@]}"; do
   # Anchored on the line name, and the name is escaped out of lines.tsv rather

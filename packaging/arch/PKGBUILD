@@ -2,7 +2,7 @@
 # QMdmm - a single Qt 6 package. Fs 2026-09-16: named qmdmm-6, no split dev
 # package; the headers and the CMake package ride along in the main one.
 pkgname=qmdmm-6
-pkgver=0.0.1
+pkgver=0.0.2
 pkgrel=1
 pkgdesc="A game which is played in primary / high school (Qt6 build)"
 arch=(x86_64)
@@ -20,9 +20,14 @@ depends=(
 # Only what is build-time-only. cmake and qt6-tools are already above, and
 # makepkg honours depends at build time as well.
 makedepends=(ninja)
-# Local source tarball: git archive of d0f89c9 (origin/main @ 2026-09-16), not a codeload download.
+# Local source tarball: a `git archive` of tag 0.0.2, not a codeload download.
+# In CI the tarball is produced the same way but from whatever ref the run was
+# handed, and `updpkgsums` re-derives the pin below before `makepkg` runs - so
+# what is committed here is what a hand build of this recipe gets. `pkgver` is
+# the number `release/assert-release-version.sh` holds to the tag being
+# released, since nothing else compares the two.
 source=("qmdmm-6-${pkgver}.tar.gz")
-sha256sums=('355e0cba7d4b8b33c93e2418b36f9af3a3144d8e7d4b24adba8d317db56a91b5')
+sha256sums=('1991ccbd908656854bd03fc1fe91c9d21a1a0c50838044fbe06cf8d086ab89f2')
 options=(!debug !lto)
 
 prepare() {

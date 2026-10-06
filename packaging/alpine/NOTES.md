@@ -37,21 +37,32 @@ write-up with the pitfall table: `nemn9852/qmdmm-maintenance#20`.
 
 ## Source tarball
 
-`source=` points to a local `qmdmm-0.0.1.tar.gz` (not committed here — this repo
+`source=` points to a local `qmdmm-0.0.2.tar.gz` (not committed here — this repo
 keeps no binaries). Produce it from the QMdmm git tree, **not** a codeload download:
 
 ```bash
 git clone https://github.com/QMdmm/QMdmm && cd QMdmm
-git archive --format=tar.gz --prefix=qmdmm-0.0.1/ d0f89c92a7299d6315c1c779584dfe52b21dc4d8 \
-  -o qmdmm-0.0.1.tar.gz
-# sha512: 9cf64de80234d42f969fdaebf762f9fe79980714725d99d94614a9de3f6ae09
-#         998cbe150956bf54fc7977ba34472cc79282ab73d0d1ea73bc3831c603c2fdbce
+git archive --format=tar.gz --prefix=qmdmm-0.0.2/ 0.0.2 \
+  -o qmdmm-0.0.2.tar.gz
+# sha512: 739b33dbc91f95491e1bf0bab77eab0feba549d9059487dec38f028c64784b5b
+#         98ad7a7d8c21315d72b82c14222be034bf4ad386756eeb25476c53c31ba8b576
 ```
 
-Commit `d0f89c9` = `origin/main` at 2026-09-16. The prefix matters: abuild
-expects the tarball to unpack to `$pkgname-$pkgver`. Put the tarball next to the
-APKBUILD, then `abuild`. The `sha512sums` pin catches any regenerated tarball
-that doesn't match (e.g. from a different git version or prefix).
+The prefix matters: abuild expects the tarball to unpack to `$pkgname-$pkgver`.
+Put the tarball next to the APKBUILD, then `abuild`. The `sha512sums` pin catches
+any regenerated tarball that doesn't match (e.g. from a different git version or
+prefix).
+
+`0.0.2` is the tag this recipe names and the hash is the archive of that tag —
+the same `git archive` command a run performs — and not the tarball of the build
+measured on 2026-09-16, which was 0.0.1's from `d0f89c9` = `origin/main` at that
+date. In CI the tarball is generated from whatever ref the run was handed and
+`abuild checksum` re-derives this pin before `abuild -r`, so the committed value
+is what a hand build gets and not what a later run packages. What keeps the
+VERSION honest is `release/assert-release-version.sh`: the tag, the tagged tree
+and the three recipe files have to say one version, because `pkgver` here is read
+by nothing else in the harness and a release dispatched with them apart would
+publish packages of two versions in one repository with every stage green.
 
 ## Environment facts (v3.24, x86_64)
 
@@ -121,7 +132,7 @@ that doesn't match (e.g. from a different git version or prefix).
 - **`-dev` owning `/usr/lib/cmake/QMdmm6/*` is Alpine convention, not a bug.**
   abuild's default `split_dev` grabs the cmake config dir (7 files), headers
   and dev `.so` symlinks; the main package keeps none of them, and `-dev`
-  auto-declares `depend = qmdmm=0.0.1-r0`. Consumers `find_package(QMdmm6)`
+  auto-declares `depend = qmdmm=<pkgver>-r0`. Consumers `find_package(QMdmm6)`
   after installing `-dev`. This differs from the CPack `dev6` layout on the
   deb/rpm lines — leave it.
 - **`depends` needs only** `qt6-qtbase qt6-qtdeclarative qt6-qtwebsockets`.
@@ -140,7 +151,7 @@ that doesn't match (e.g. from a different git version or prefix).
   names. Added for the CI line, whose stage C builds a consumer from the installed
   `qmdmm-dev` alone (`find_package(Qt6 ...)` has to succeed there); the local run
   never did that, so it could not have caught the omission.
-- `options="!check !debug"`: 0.0.1 keeps size sane (debug subpackages off), and
+- `options="!check !debug"`: `!debug` keeps the size sane (debug subpackages off), and
   `check()` was intentionally not wired (build ran with `BUILD_TESTING=OFF`).
   When adding it later: `-DBUILD_TESTING=ON` + `ctest` for `tst_qmdmm_smoke6`.
 

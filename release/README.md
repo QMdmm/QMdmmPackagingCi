@@ -10,6 +10,13 @@ writes names every bottle there is and stage B installs that formula as it
 stands. Three rows is where a block stops being something one row can write,
 which is the whole reason the merge stage exists.
 
+Eight lines are published. Seven of them are OpenPGP lines — debian, ubuntu,
+fedora, rocky, alma, arch and manjaro — and their twelve rows are the matrices of
+the three stages above. Alpine is a job group of its own with five rows, and the
+two macOS faces are a third. Every line's shape is different enough to need its
+own section below; what they share is that a consumer's position is what gets
+asserted, in a clean container, with no secret in reach.
+
 ## Where this came from
 
 Everything here was developed and rehearsed in `nemn9852/qmdmm-signing-lab`, a
@@ -29,14 +36,15 @@ called differently (its repository was `lab`, so its package database was
 
 | script | stage | runs on | holds |
 |---|---|---|---|
-| `assert-revision-tag.sh` | guard | CI | nothing |
+| `assert-revision-tag.sh` | guard: the ref is a tag | CI | nothing |
+| `assert-release-version.sh` | guard: the tag, its tree and the recipes carry one version | CI | nothing |
 | `sign-repo-<fmt>.sh` | S sign | CI, in the row's own image | **that line's subkey** |
 | `mkrepo-debian.sh` | (helper for S/deb) | CI | the key it is handed |
 | `check-fingerprints.sh` | gate in the publish job | CI | nothing |
 | `publish-brew.sh` | publish: stage the bottles, write their address into the formula | CI, publish job | nothing |
 | `publish-macos.sh` | publish: attach the `.dmg` to the product repository's release | CI, publish job | **a token for the product repository** |
 | `publish-tap.sh` | publish: put this release's formula into the Homebrew tap | CI, publish job | **the same token** |
-| `consume-<consumer>.sh` | trust: install and verify as a consumer | CI, clean container | nothing |
+| `consume-<consumer>.sh` | trust: install and verify as a consumer (`apt`, `dnf`, `pacman`, `apk`) | CI, clean container | nothing |
 | `consume-apt-keyring.sh`, `consume-keyring-package.sh`, `consume-dnf-keyring-package.sh` | trust: the keyring bootstrap | CI, clean container | nothing |
 | `mkkeyring-deb.sh`, `mkkeyring-rpm.sh` | build the root-signed keyring source | **a trusted machine, never CI** | the **root** key |
 | `lib-tools.sh`, `lib-site.sh` | shared helpers | — | — |
@@ -46,6 +54,20 @@ called differently (its repository was `lab`, so its package database was
 and the line fingerprints. There is no such file in this repository and there
 must not be: the root secret never enters CI, which is what makes the
 root-signed keyring source a trusted-machine step rather than a workflow one.
+
+`assert-release-version.sh` is the guard's second question, and the reason there
+is a second one at all. `packaging/arch/PKGBUILD` and
+`packaging/alpine/APKBUILD` carry a version of their own — they are files
+somebody can build from by hand, with the version they say — while the deb, rpm,
+Homebrew and macOS lines take theirs from the tagged tree, and no stage compares
+the two. A release dispatched with them apart would publish packages of two
+different versions in one repository with every stage green, and the version is
+not a field any of those stages reads. The check sits on the release path rather
+than inside `ci/pack-*.sh` because those scripts are also the daily run's, and
+the daily run packages `main` rather than a tag: a version check there would turn
+every version bump into a red daily run until somebody edited a recipe here.
+Syncing the recipes is a step of declaring the release — that is the whole of it
+— and this is what makes forgetting that step loud instead of silent.
 
 ## The two macOS faces, and why they publish apart
 
@@ -120,6 +142,71 @@ second dispatch of the same tag is a no-op rather than a failure. The tap stage
 compares what it is about to push against the tap and refuses anything beyond
 the pin and the block. The reasoning for each is at the top of its script.
 
+## The Alpine face
+
+Alpine runs as a job group of its own for two structural reasons, and only the
+first is about packaging.
+
+**It has no stage S.** `abuild` signs every package and the repository index
+unconditionally — it cannot be told not to, and it dies without a key — so
+`ci/pack-apk.sh` already finishes with a signed `APKINDEX.tar.gz` beside signed
+packages. What stage A produced IS what gets published, which is why the
+`publish` job waits on all three of the Alpine rows — `pack-apk` *and* both
+verify jobs — while it waits only on `sign` for the other seven lines: stages B
+and C reach `publish` by way of the signing stage, which collects them, and this
+line has no stage S for anything to collect. On this line the first stop after
+packing is the published repository. A repository, not a `foo.db` or a
+`dists/`: apk appends `<arch>/APKINDEX.tar.gz` to whatever address a consumer
+names, so the site's `alpine/<version>/` holds the architecture directory and
+nothing else, and the MANIFEST stage A writes alongside it is dropped rather
+than published — it is this harness's bookkeeping and not a file any apk asks a
+repository for.
+
+**Its signing key comes out of an environment.** `environment:` is a job-level
+key in `release.yml`, so a row that needs one cannot share a job with the twelve
+rows that must not have one. Those are deliberately environment-free, and
+keeping them that way is what makes "a packaging line cannot see a signing
+secret" a property of the layout rather than a property of everybody's care.
+
+Two keys, and they are different files rather than two names for one:
+
+* `qmdmm-daily-<hex>` signs the daily smoke build. Its private half is the
+  repository-level `PACKAGER_PRIVKEY` and nothing it signs is ever published, so
+  no consumer is ever told to trust it.
+* `qmdmm-release-<hex>` is the only key a consumer of a published repository
+  should end up with, and its private half is the `alpine` environment's
+  `SIGNING_KEY`. Here the NAME is the whole identity — apk resolves a package's
+  signature by looking for a file called `.SIGN.RSA.<basename>` in
+  `/etc/apk/keys`, and apk has no revocation of any kind — so rotating it can
+  only mean generating a new name and asking every consumer to delete the old
+  file by hand.
+
+There is no keyring source on this line, unlike deb and rpm: apk has no
+convention of a package that carries a key, and the whole consumer action is
+putting that one file in `/etc/apk/keys` and naming the repository. What the
+publish job stages is therefore the key file itself, at `keys/alpine/`, beside
+the other lines' key material — and the front page prints `sha256(DER)` of it,
+which is what abuild itself reports for such a key and the only reading that
+gives it an identity other than the file. That value is derived from the key
+file as the page is written, so it is the one line's reading on the front page
+that cannot drift from the key it names; `release/check-fingerprints.sh` says so
+where it walks the list.
+
+`release/consume-apk.sh` is the cell that reads the claim, and its negative half
+is where the two-key design is measured: it installs the release key from the
+site, updates, and installs; then it does the whole thing again with the *daily*
+key in the release key's place, which must be refused. The daily key is the
+right wrong key — it is public, it signs the daily build, and a consumer who went
+looking could find it — where a key nobody could obtain would prove less.
+
+The five versions are `3.21`, `3.22`, `3.23`, `3.24` and `edge`: one row per
+Alpine release, and the same five rows in each of the three stages. `alpine:latest`,
+which the daily line tests, is deliberately not one of them — a published
+repository has to name the release it serves, which is the same reason the other
+matrices carry concrete versions. `3.24` is what `latest` currently is, and it is
+listed beside the others so that the name in the path stays put when the floating
+tag moves on.
+
 ## Rehearsing a script here
 
 Every script under `release/` runs on the publish job's **ubuntu-latest** runner,
@@ -165,7 +252,10 @@ reasoned about rather than read under the runner's engine.
   configures into the consumer's `sources.list.d`, so one directory serving two
   of them would be able to hand a consumer the wrong one. `mkkeyring-deb.sh`
   carries the full argument at its top.
-* **The Alpine line.** `apk` signs inside stage A rather than in a signing stage
-  of its own (abuild cannot be told not to sign), and the lab never exercised
-  that line at all — it is the one line whose release path is undesigned rather
-  than merely unported.
+* **`genesis-alpine-key.sh`**, the script that mints the Alpine release key and
+  says where its name has to agree. It is the step a rotation starts from on
+  that line, and a rotation there is not the same shape as on the other seven:
+  there are no subkeys and no revocation, so it is a new name plus every
+  consumer deleting the old file by hand. It is in the lab with
+  `rotate-line-local.sh` because both are on the path a line takes *after* a
+  leak rather than on the path to a release.

@@ -5,6 +5,10 @@ name: release
 #
 #   guard → pack → verify-runtime → verify-dev → sign → publish → trust
 #
+# Two faces run as job groups of their own beside that chain rather than as rows
+# of its matrices — Alpine, and the two macOS lines — for reasons that are
+# job-level rather than about what is being packaged. See each group's comment.
+#
 # The pack / verify stages and the trust stages are the same scripts the daily
 # smoke run exercises. What this workflow adds is the tag guard, the signing
 # stage and the publication. Its shape was rehearsed end to end in
@@ -13,15 +17,11 @@ name: release
 # and a rotated line — exist to measure an incident response rather than to
 # publish anything, and belong to that lab's subject rather than this one's.
 #
-# Two things are deliberately NOT in this file:
-#
-#   * the root key. A line's subkey signs that line's day-to-day source, and the
-#     keyring source — the one a consumer has to trust before it can trust
-#     anything else — is built on a trusted machine and committed. A trust root
-#     a workflow could replace is not a trust root.
-#   * the Alpine line. abuild signs inside the pack stage because it cannot be
-#     told not to, so that line's release path is a different design rather than
-#     another row here; the lab never exercised it either.
+# One thing is deliberately NOT in this file: the root key. A line's subkey
+# signs that line's day-to-day source, and the keyring source — the one a
+# consumer has to trust before it can trust anything else — is built on a
+# trusted machine and committed. A trust root a workflow could replace is not a
+# trust root.
 #
 # The two macOS lines are a job group of their own rather than rows of the
 # stage matrices: a macOS runner cannot run a Linux container, and `runs-on`
@@ -40,7 +40,7 @@ name: release
 # deciding to make it. It also writes the gh-pages branch, which is the
 # published repository.
 #
-#   gh workflow run release.yml -f qmdmm_ref=0.0.1
+#   gh workflow run release.yml -f qmdmm_ref=0.0.2
 on:
   workflow_dispatch:
     inputs:
@@ -96,6 +96,16 @@ env:
   # depends on: the formula under test comes from the tap, and its Qt
   # dependencies resolve from whatever index is on the machine.
   HOMEBREW_NO_AUTO_UPDATE: '1'
+  # ---- the Alpine face -----------------------------------------------------
+  # Which of the line's two keys signs this run. It is a NAME and not a secret,
+  # and it is pinned here rather than derived from the secret for the reason the
+  # Alpine line differs from every other one: apk identifies a key by the file
+  # name it looks for in /etc/apk/keys - `.SIGN.RSA.<basename>` - so the name is
+  # the identity, there is no subkey to discover and no revocation to fall back
+  # on. The daily smoke line pins the daily name the same way; what tells them
+  # apart is that this file's rows declare the `alpine` environment and that
+  # file's cannot.
+  PACKAGER_KEY: qmdmm-release-6abe2dbc
 
 defaults:
   run:
@@ -118,6 +128,19 @@ jobs:
         env:
           REVISION: ${{ github.event.inputs.qmdmm_ref }}
         run: bash "$PWD/release/assert-revision-tag.sh"
+      # A second question, and the last moment both halves of it are in hand.
+      # The version a release is called and the version its recipes stamp into
+      # packages are written by hand in different files and read by nothing
+      # downstream - the deb, rpm, Homebrew and macOS lines take theirs from the
+      # tagged tree, while packaging/arch and packaging/alpine carry their own -
+      # so a release that reached the publish stage with them apart would put
+      # packages of two versions in one published repository, green throughout.
+      # It is here rather than in the pack scripts because those are also the
+      # daily run's, and the daily run packages `main` rather than a tag.
+      - name: Assert the recipes pin the version being released
+        env:
+          REVISION: ${{ github.event.inputs.qmdmm_ref }}
+        run: bash "$PWD/release/assert-release-version.sh"
 
   # ================================================================= stage A
   # One row per (line, version), in that row's own distribution image. This is
@@ -250,6 +273,164 @@ jobs:
       - name: Run the rebuilt Bot against the installed Server
         env:
           DIST_KIND: ${{ matrix.fmt }}
+        run: ci/run-verify-linux.sh
+
+  # ============================================== the Alpine face (A / B / C)
+  # The one line whose published repository IS stage A's output. `abuild` cannot
+  # be told not to sign: it signs every package and the index unconditionally and
+  # dies without a key, so ci/pack-apk.sh already produces a *signed*
+  # APKINDEX.tar.gz beside the packages and there is nothing left for a signing
+  # stage to do. Three stages, then, and no fourth - the shape the two macOS
+  # faces have, for an unrelated cause.
+  #
+  # The rows are a job group of their own rather than rows of `pack` above, and
+  # the reason is the key. A release is signed by the RELEASE key, whose private
+  # half is the `alpine` environment's SIGNING_KEY. `environment:` is a
+  # job-level key in this file, so a row that needs one cannot share a job with
+  # rows that must not have one - and the twelve rows above are deliberately
+  # environment-free. Keeping them that way is what makes "a packaging line
+  # cannot see a signing secret" a property of the layout instead of a property
+  # of everybody's care.
+  #
+  # The two Alpine keys are different files and not two names for one.
+  # `qmdmm-daily-<hex>` is what the daily smoke line signs with; its private half
+  # is the repository-level PACKAGER_PRIVKEY, and nothing it signs is ever
+  # published. `qmdmm-release-<hex>` is the only key a consumer of the published
+  # repository should end up with. Here the NAME is the whole identity - apk
+  # resolves a package's signature by looking for a file called
+  # `.SIGN.RSA.<basename>` in /etc/apk/keys, and apk has no revocation of any
+  # kind - so PACKAGER_KEY is pinned in this file rather than discovered, and
+  # rotating means generating a new name and asking every consumer to delete the
+  # old file by hand.
+  #
+  # The five versions are the Alpine rows of #24. `alpine:latest`, which the
+  # daily line tests, is not one of them: a published repository has to name the
+  # release it serves, which is the same reason the matrices above carry
+  # concrete versions. `alpine:3.24` is the version `alpine:latest` currently
+  # is; it is listed beside the others so that the name in the path stays put
+  # when the floating tag moves on.
+  pack-apk:
+    name: "A pack (alpine ${{ matrix.version }})"
+    needs: [guard]
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    environment: alpine
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: 3.21, image: "alpine:3.21" }
+          - { version: 3.22, image: "alpine:3.22" }
+          - { version: 3.23, image: "alpine:3.23" }
+          - { version: 3.24, image: "alpine:3.24" }
+          - { version: edge, image: "alpine:edge" }
+    steps:
+      # Same reason as the daily line: this image ships busybox ash and this file
+      # declares bash as its shell, so bash has to arrive before anything else
+      # can run - and this one step has to ask for `sh`, which does exist.
+      - name: Install bash
+        shell: sh
+        run: apk add --no-cache bash
+
+      - uses: actions/checkout@v7
+      - name: Pack
+        env:
+          # The release key, out of the one environment that holds it. The script
+          # compares it against the public half committed in packaging/alpine/,
+          # which is the only thing that turns "the secret is set" from a claim
+          # about a keystroke into a reading about bytes.
+          PRIVKEY: ${{ secrets.SIGNING_KEY }}
+        run: ci/pack-apk.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          # Named `pack-alpine-<version>` so that every stage below and the
+          # consumer cell can address it with the same formula the other lines
+          # use: `pack-<line>-<version>`.
+          name: pack-alpine-${{ matrix.version }}
+          path: out
+          if-no-files-found: error
+
+  # Stage B for the Alpine rows: a clean container of the same Alpine release,
+  # holding nothing but the packages. Same three questions as every other line,
+  # and the same two scripts.
+  verify-runtime-apk:
+    name: "B runtime (alpine ${{ matrix.version }})"
+    needs: [pack-apk]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: 3.21, image: "alpine:3.21" }
+          - { version: 3.22, image: "alpine:3.22" }
+          - { version: 3.23, image: "alpine:3.23" }
+          - { version: 3.24, image: "alpine:3.24" }
+          - { version: edge, image: "alpine:edge" }
+    steps:
+      - name: Install bash
+        shell: sh
+        run: apk add --no-cache bash
+      - uses: actions/checkout@v7
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: pack-alpine-${{ matrix.version }}
+          path: pkgs
+      - name: Install the runtime package
+        env:
+          # On this line the runtime package is plain `qmdmm`, with no Qt
+          # generation in it, so the "suffix" is the whole name.
+          DIST_SFX_RUNTIME: qmdmm
+        run: ci/runtime-apk.sh
+      - name: Verify the installed programs
+        env:
+          DIST_KIND: apk
+        run: ci/runtime-verify-linux.sh
+
+  # Stage C for the Alpine rows: is `qmdmm-dev` alone enough to build QMdmm's own
+  # consumer project against, and do the executables it produces work?
+  verify-dev-apk:
+    name: "C dev (alpine ${{ matrix.version }})"
+    needs: [pack-apk]
+    if: always() && !cancelled()
+    runs-on: ubuntu-latest
+    container:
+      image: ${{ matrix.image }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { version: 3.21, image: "alpine:3.21" }
+          - { version: 3.22, image: "alpine:3.22" }
+          - { version: 3.23, image: "alpine:3.23" }
+          - { version: 3.24, image: "alpine:3.24" }
+          - { version: edge, image: "alpine:edge" }
+    steps:
+      - name: Install bash
+        shell: sh
+        run: apk add --no-cache bash
+      - uses: actions/checkout@v7
+      - name: Download packages
+        uses: actions/download-artifact@v8
+        with:
+          name: pack-alpine-${{ matrix.version }}
+          path: pkgs
+      - name: Install the dev package
+        env:
+          DIST_SFX_RUNTIME: qmdmm
+          DIST_SFX_DEV: -dev
+        run: ci/dev-apk.sh
+      - name: Build the consumer project
+        env:
+          DIST_KIND: apk
+        run: ci/build-verify-linux.sh
+      - name: Run the rebuilt Bot against the installed Server
+        env:
+          DIST_KIND: apk
         run: ci/run-verify-linux.sh
 
   # =========================================== the macOS faces (A / B / C)
@@ -632,6 +813,16 @@ jobs:
   # lines: a hard-coded list is what silently drops every artifact the day the
   # naming changes.
   #
+  # It waits on `sign` for the seven OpenPGP lines and on all three Alpine rows
+  # directly, and the asymmetry is the point rather than an oversight: `sign` is
+  # where the other lines' verify stages are collected - a red stage B or C
+  # there stops the signing stage, and this job with it - while the Alpine line
+  # has no signing stage, so nothing else would carry its stage A (the artifact
+  # this job assembles the published repository out of) or its stages B and C to
+  # here. "Nothing is published that has not been through the stages its line
+  # has" is what these dependencies say, and it should say it about every line
+  # rather than about seven of them.
+  #
   # The Homebrew line comes in here too, and it is the one publication that is
   # not a directory of packages: what a consumer of that line configures is a
   # tap, and what the tap needs from a release is the bottle and the formula
@@ -639,7 +830,7 @@ jobs:
   # also where the argument for the address being this site's lives.
   publish:
     name: "publish"
-    needs: [sign]
+    needs: [sign, pack-apk, verify-runtime-apk, verify-dev-apk]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -697,6 +888,45 @@ jobs:
           echo "  $n signed repository/repositories staged"
           [ "$n" -ge 1 ] || { echo "!! no stage-S artifact to publish"; exit 1; }
 
+          # The Alpine repositories do NOT arrive through stage S, and that is
+          # the line's shape rather than a shortcut: abuild signs the index
+          # inside stage A, so what pack-apk uploaded already is the published
+          # repository. It gets its own loop instead of being folded into the one
+          # above because the two come from different jobs and their names carry
+          # a different shape - `pack-apk-<version>` names no line, and the line
+          # it belongs to is the one this workflow says it is.
+          #
+          # What is copied is the artifact's contents, which is the repository
+          # root: the index sits one level down, under the architecture
+          # directory (`x86_64/APKINDEX.tar.gz`), because apk appends
+          # `/<arch>/APKINDEX.tar.gz` to whatever a consumer names. MANIFEST.tsv
+          # travels with the artifact and is dropped here: it is this harness's
+          # own bookkeeping and not a file any apk will ask a repository for.
+          m=0
+          for d in artifacts/pack-apk-*; do
+            aver="${d#artifacts/pack-apk-}"
+            [ -n "$aver" ] || { echo "!! cannot read an Alpine version out of '$d'"; exit 1; }
+            rm -rf "_site/alpine/$aver"
+            mkdir -p "_site/alpine/$aver"
+            cp -r "$d/." "_site/alpine/$aver/"
+            rm -f "_site/alpine/$aver/MANIFEST.tsv"
+            echo "  pack-apk-$aver -> alpine/$aver  ($(find "$d" -type f | wc -l | tr -d ' ') files)"
+            m=$((m+1))
+          done
+          echo "  $m Alpine repository/repositories staged"
+          [ "$m" -ge 1 ] || { echo "!! no Alpine repository to publish"; exit 1; }
+
+          # And the key a consumer of them has to install. It is staged from the
+          # committed public half rather than from the secret - what is published
+          # has to be the file the repository says the key is, which is exactly
+          # the thing stage A compared the secret against. No keyring *source* is
+          # built for this line, unlike deb and rpm: Alpine has no convention of
+          # a key-carrying package, and the whole consumer action is putting this
+          # one file in /etc/apk/keys and naming the repository.
+          mkdir -p _site/keys/alpine
+          cp "packaging/alpine/$PACKAGER_KEY.rsa.pub" "_site/keys/alpine/$PACKAGER_KEY.rsa.pub"
+          echo "  packaging/alpine/$PACKAGER_KEY.rsa.pub -> keys/alpine/"
+
           {
             echo '<!doctype html><meta charset="utf-8">'
             echo '<title>QMdmm packages</title>'
@@ -705,7 +935,20 @@ jobs:
             echo 'installs the repository configuration and the signing keys.</p>'
             echo '<h2>Fingerprints</h2><pre>'
             sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' keys/fingerprints.txt
-          echo '</pre><h2>Repository roots</h2><ul>'
+          echo '</pre>'
+          # The Alpine key is named rather than fingerprinted as OpenPGP, because
+          # it is not an OpenPGP key at all: apk identifies one by the file name
+          # it looks for in /etc/apk/keys, so the name is the whole identity, and
+          # what abuild itself reports for such a key is sha256 of its DER public
+          # half. Printing that value is what gives a consumer something to check
+          # the file they fetched against that is not the file itself.
+          if [ -f "_site/keys/alpine/$PACKAGER_KEY.rsa.pub" ]; then
+            echo '<h2>Alpine</h2><pre>'
+            echo "  $PACKAGER_KEY.rsa.pub"
+            echo "  sha256(DER) $(openssl pkey -pubin -in "_site/keys/alpine/$PACKAGER_KEY.rsa.pub" -outform DER | sha256sum | awk '{print $1}')"
+            echo '</pre>'
+          fi
+          echo '<h2>Repository roots</h2><ul>'
           # A line directory holds one row per version; anything else at the top
           # level is material built off-CI (the keyring sources). Derived from
           # release/lines.tsv rather than listed, so that it cannot drift from
@@ -960,7 +1203,27 @@ jobs:
           - { line: alma,    fmt: rpm, version: 10,       image: "almalinux:10",             consumer: dnf }
           - { line: arch,    fmt: pac, version: rolling,  image: "archlinux:base",           consumer: pacman }
           - { line: manjaro, fmt: pac, version: rolling,  image: "manjarolinux/base:latest", consumer: pacman }
+          # The Alpine rows. They are consumers like every other row here - no
+          # environment, no secret - and consume-apk.sh is what puts them in that
+          # position: the key it installs is the one the site serves, fetched
+          # over the network, and the negative half is the one that has teeth on
+          # this line, since there is no keyring source and therefore no other
+          # place the "only the release key is trusted" claim could be read.
+          - { line: alpine,  fmt: apk, version: 3.21,     image: "alpine:3.21",              consumer: apk }
+          - { line: alpine,  fmt: apk, version: 3.22,     image: "alpine:3.22",              consumer: apk }
+          - { line: alpine,  fmt: apk, version: 3.23,     image: "alpine:3.23",              consumer: apk }
+          - { line: alpine,  fmt: apk, version: 3.24,     image: "alpine:3.24",              consumer: apk }
+          - { line: alpine,  fmt: apk, version: edge,     image: "alpine:edge",              consumer: apk }
     steps:
+      # This file declares bash as the shell for every `run:` step, and the
+      # Alpine image ships busybox ash alone - so on those rows bash has to
+      # arrive before anything else can run, and this one step has to ask for
+      # `sh`, which is the one that does exist. The other lines start with bash.
+      - name: Install bash
+        if: matrix.fmt == 'apk'
+        shell: sh
+        run: apk add --no-cache bash
+
       - uses: actions/checkout@v7
       - name: Confirm no secret is reachable (a consumer's position)
         env:

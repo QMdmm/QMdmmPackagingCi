@@ -38,10 +38,10 @@ wording.
 
 Every job checks this repository out and downloads its artifacts *before* its
 stage script runs, so a script never has to be split around a `uses:` step. The
-three `Install bash` steps stay in the workflow — one per stage — because they
-run under `sh`, before bash exists on Alpine, which is the one thing a
-`#!/usr/bin/env bash` script cannot do. The two macOS stages carry an install of
-their own for the same kind of reason: `gtimeout` is not in the image, and
+`Install bash` steps stay in the workflow — one per container stage — because
+they run under `sh`, before bash exists on Alpine, which is the one thing a
+`#!/usr/bin/env bash` script cannot do. The two macOS stages carry an install
+of their own for the same kind of reason: `gtimeout` is not in the image, and
 coreutils is what provides it.
 
 ## Why the stages do not share a container
@@ -236,10 +236,15 @@ repository settings hold the private half of each.
   half, copied into the consuming container's `/etc/apk/keys/` by stages B and C.
   Nothing it signs is published, so no consumer is ever told to trust it.
 * `packaging/alpine/qmdmm-release-6abe2dbc.rsa.pub` — the **release** key's public
-  half, and the one a consumer of a published apk repository would have to have in
-  `/etc/apk/keys/`. There is no such repository: `release.yml` (see
-  `release/README.md`) publishes the deb, rpm and pac lines and has no apk row, so
-  the daily key above is the only one anything is signed with today.
+  half, and the one a consumer of a published apk repository has to have in
+  `/etc/apk/keys/`. `release.yml` publishes this line as it publishes the other
+  three: what stage A produced is the published repository, because abuild signs
+  the index inside it and there is no signing stage for the line, and the key a
+  consumer installs is staged from this file at `keys/alpine/`. So the daily key
+  above signs the daily build and nothing else, and this is the one a consumer
+  ends up holding. `release/README.md` has the shape of that line — the five
+  Alpine releases, the job group of its own, and the consumer cell that installs
+  with this key and then shows the daily key is refused in its place.
 * the `PACKAGER_PRIVKEY` secret, at repository level — the daily key's private
   half, written to `~builder/.abuild/qmdmm-daily-6abe0b34.rsa` in stage A, and
   nowhere else. Stage A hands it over on that line's row only: the environment

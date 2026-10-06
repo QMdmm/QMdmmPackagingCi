@@ -11,3 +11,8 @@ rocky	rpm	dnf	10	rockylinux/rockylinux:10	-6 -6-devel -common-devel -doc	-6	-6-d
 alma	rpm	dnf	10	almalinux:10	-6 -6-devel -common-devel -doc	-6	-6-devel
 arch	pac	pacman	rolling	archlinux:base	-6	-6	-6
 manjaro	pac	pacman	rolling	manjarolinux/base:latest	-6	-6	-6
+alpine	apk	apk	3.21	alpine:3.21	qmdmm qmdmm-dev qmdmm-doc	qmdmm	-dev
+alpine	apk	apk	3.22	alpine:3.22	qmdmm qmdmm-dev qmdmm-doc	qmdmm	-dev
+alpine	apk	apk	3.23	alpine:3.23	qmdmm qmdmm-dev qmdmm-doc	qmdmm	-dev
+alpine	apk	apk	3.24	alpine:3.24	qmdmm qmdmm-dev qmdmm-doc	qmdmm	-dev
+alpine	apk	apk	edge	alpine:edge	qmdmm qmdmm-dev qmdmm-doc	qmdmm	-dev
