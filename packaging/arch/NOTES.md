@@ -5,9 +5,8 @@ in one pass. Dependency metadata was then proven by *real resolution*: `qt6-webs
 was removed from the system, and a plain `pacman -U` of the local package (no
 `--nodeps`/`--force`) resolved and reinstalled it from the repo alongside `qmdmm-6`.
 Afterwards ldd was clean for all three binaries, the GUI survived a 20s offscreen
-timeout, and the in-repo `smoke` test exited 0. Full write-up with pitfalls:
-`nemn9852/qmdmm-maintenance#19`. This recipe later became the Arch line of
-`.github/workflows/packaging-smoke.yml`.
+timeout, and the in-repo `smoke` test exited 0. This recipe later became the Arch
+line of `.github/workflows/packaging-smoke.yml`.
 
 Single-package form (`qmdmm-6`, no split `-dev`) per Fs's call:
 headers and `/usr/lib/cmake/QMdmm6/QMdmm6Config.cmake` ship in the main package.

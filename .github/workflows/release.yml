@@ -303,9 +303,9 @@ jobs:
   # rotating means generating a new name and asking every consumer to delete the
   # old file by hand.
   #
-  # The five versions are the Alpine rows of #24. `alpine:latest`, which the
-  # daily line tests, is not one of them: a published repository has to name the
-  # release it serves, which is the same reason the matrices above carry
+  # The five versions are the ones this line publishes for. `alpine:latest`,
+  # which the daily line tests, is not one of them: a published repository has to
+  # name the release it serves, which is the same reason the matrices above carry
   # concrete versions. `alpine:3.24` is the version `alpine:latest` currently
   # is; it is listed beside the others so that the name in the path stays put
   # when the floating tag moves on.

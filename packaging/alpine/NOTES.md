@@ -5,8 +5,7 @@ Verified end-to-end 2026-09-16. `abuild` built `qmdmm-0.0.1-r0.apk` plus `-dev` 
 metadata was then proven by *real resolution*: a second, pristine rootfs
 (`apk add qmdmm qmdmm-dev qmdmm-doc`, no `--force` / `--nodeps`) pulled 103
 packages from the local repo + upstream mirrors, rc=0. Afterwards ldd was clean
-for all three binaries and the GUI survived a 20s offscreen timeout. Full
-write-up with the pitfall table: `nemn9852/qmdmm-maintenance#20`.
+for all three binaries and the GUI survived a 20s offscreen timeout.
 
 ## Files
 
@@ -97,10 +96,10 @@ publish packages of two versions in one repository with every stage green.
   `User %s is not a member of group %s`). No wheel group, no NOPASSWD
   sudoers — and **keep `-d` off** for the same reason as before: `-d` skips
   that makedepends resolution entirely, silently deleting the very thing CI
-  must verify. (The verified local run in #20 used `-d` only because its
-  host-side tooling — proot, no setuid emulation — couldn't execute
+  must verify. (The local run described at the top of this file used `-d` only
+  because its host-side tooling — proot, no setuid emulation — couldn't execute
   `abuild-sudo`; that constraint does not exist in containers, so do not copy
-  the `-d` / `-i 100:100` / `HOME=/root` details from there.)
+  the `-d` / `-i 100:100` / `HOME=/root` details from it.)
   One caveat if you use plain `su builder` (no dash): HOME stays the root
   shell's, so `abuild-keygen` writes into `/root/.abuild` and the later
   signing step fails to read `PACKAGER_PRIVKEY` — prefer `su -` as above.
