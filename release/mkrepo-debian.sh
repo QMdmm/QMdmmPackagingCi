@@ -10,6 +10,11 @@
 #   - frozen fixtures, e.g. "a source signed by the subkey that was later
 #     revoked", kept around so a consumer-side test can prove it gets rejected.
 #
+# It also writes this repository's priority discipline into the Release header -
+# see the note at the fields themselves. Both callers get it: the keyring source
+# built here on a trusted machine, and the day-to-day source built by
+# sign-repo-deb.sh in CI.
+#
 # usage: mkrepo-debian.sh <key-fpr> <outdir> [suite] [description]
 set -euo pipefail
 
@@ -67,6 +72,33 @@ gzip -kf "$ARCHDIR/Packages"
   # consumer in a lab whose whole point is that apt accepts this repository.
   echo "Suite: $SUITE"
   echo "Codename: $SUITE"
+  # The pair below is this repository's priority discipline, and it is what keeps
+  # a third party a third party. Measured, with every apt directory redirected to
+  # a scratch tree and nothing actually installed, on Debian forky's apt 3.3.3 -
+  # which is also the deb rows' own distribution - against a stand-in
+  # distribution of a different origin that ships this package name at a version
+  # below the one in this pool. That is the case that matters - a third party
+  # taking a name over is only a problem when the name is not ours alone:
+  #
+  #   no fields             the higher version here becomes the candidate, so the
+  #                         repository takes a distribution's name over;
+  #   NotAutomatic alone    the distribution keeps the candidate, but an
+  #                         installed package stops upgrading - the whole source
+  #                         is frozen, the keyring package included, and that
+  #                         package is the carrier a key rotation travels on;
+  #   this pair             a fresh install and an upgrade behave exactly as they
+  #                         do under Pin-Priority: 100, and the distribution
+  #                         still keeps the candidate.
+  #
+  # It is a field of the source rather than a preferences file carried by the
+  # keyring package, so it also reaches the consumers who configure the source by
+  # hand and never install that package, and it needs no package version to move.
+  # `Pin-Priority: 1` - the value that was proposed before that measurement - is
+  # not merely like `NotAutomatic` alone: that source is the one apt reads at
+  # priority 1. No distribution ships any of these package names today, so this is
+  # a standing rule rather than the repair of an observable takeover.
+  echo "NotAutomatic: yes"
+  echo "ButAutomaticUpgrades: yes"
   echo "Date: $(date -u '+%a, %d %b %Y %H:%M:%S UTC')"
   echo "Architectures: all"
   echo "Components: main"
