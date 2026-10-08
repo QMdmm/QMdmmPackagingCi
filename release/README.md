@@ -55,6 +55,21 @@ and the line fingerprints. There is no such file in this repository and there
 must not be: the root secret never enters CI, which is what makes the
 root-signed keyring source a trusted-machine step rather than a workflow one.
 
+A line's key file under `keys/` is **a set rather than one file**, and a rotation
+window is the state where that set has two members: the export being retired
+stays beside the live one until a later release deletes it. Two shapes carry it
+and `release/mkkeyring-deb.sh` accepts both — a single file that already carries
+both subkeys, which is what rotating a line's own primary produces and is the
+shape that reaches every consumer path (the site publishes `keys/` verbatim and
+the consumer cells fetch `qmdmm-packages.gpg` by that name), or the retired
+export dropped in as a second file, which the tool merges into the one keyring
+file the package's `Signed-By` names. The second shape is the one that until now
+existed and did nothing: a file sitting beside the live one was installed nowhere
+and read by nothing, so a rotation staged that way would have gone out carrying
+one key and looking correct. The lifecycle and the reasoning are at the top of
+the tool, and the tools that produce those exports (`rotate-line-local.sh`) are
+still in the lab — see below.
+
 `assert-release-version.sh` is the guard's second question, and the reason there
 is a second one at all. `packaging/arch/PKGBUILD` and
 `packaging/alpine/APKBUILD` carry a version of their own — they are files

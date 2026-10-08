@@ -9,8 +9,41 @@
 #
 # What it carries:
 #   /usr/share/keyrings/qmdmm-root.gpg        root public key only
-#   /usr/share/keyrings/qmdmm-packages.gpg    root + this line's signing subkey
+#   /usr/share/keyrings/qmdmm-packages.gpg    every key file under keys/<distro>/,
+#                                             concatenated as they are
 #   /etc/apt/sources.list.d/qmdmm.sources     both repos, each naming its file
+#
+# The line's key material is a SET, and a rotation window is the state where that
+# set has two members. Every *.gpg directly under keys/<distro>/ is concatenated
+# into the one file apt is pointed at -- `Signed-By: /usr/share/keyrings/
+# qmdmm-packages.gpg` is a single path, so a second file sitting beside that one
+# would be installed and then never read, which is the whole reason this tool
+# concatenates instead of copying named files. Rotating a line's signing subkey
+# is therefore: drop the export being retired into the line's directory as a
+# second file, rebuild the package at a bumped version, publish it, and delete
+# the retired file in a later version. Until that delete the package accepts
+# repositories signed by either subkey -- that overlap is the point, the outgoing
+# subkey keeps signing while every consumer picks the new one up -- and after it
+# the retired subkey's signatures are refused. The set of files IS the record of
+# where a rotation stands: what is present says what is accepted, and there is
+# nothing to keep in step beside it. Deleting a file too early is a refusal on
+# the consumer side rather than a silent acceptance, so the mistake is loud.
+#
+# A single file that already carries both subkeys satisfies the same rule with no
+# second file -- one file in, the same bytes out -- and that is the shape a
+# rotation of a line's own primary produces. It is also the wider-reaching one of
+# the two: the site publishes keys/<line>/ verbatim and the consumer cells fetch
+# qmdmm-packages.gpg by that name, so a line rotated by adding a subkey to its
+# single file reaches those paths too, while one rotated by staging a second file
+# covers the keyring package only. Both shapes are accepted here; the condition
+# either way is the same, that the outgoing subkey is still live and still
+# present in the set.
+#
+# Each file is a full export (the root, or a primary, plus whatever subkeys it
+# was exported with), so a stack repeats the primary once per member. That is
+# deliberate and harmless: a keyring is a set of keys, gpg and apt merge a
+# repeated key rather than count it twice, and no file has to be edited to
+# withdraw one subkey.
 #
 # Note there is deliberately no .deb signature. apt does not review signatures
 # at the package level at all; what protects this package is that it is served
@@ -42,14 +75,16 @@ VERSION="${3:-$(date -u +%Y.%m.%d).1}"
 SUITE="${SUITE:-sid}"
 PKG="qmdmm-archive-keyring"
 
-[ -f "keys/$DISTRO/qmdmm-packages.gpg" ] || { echo "!! keys/$DISTRO/qmdmm-packages.gpg missing"; exit 1; }
+[ -d "keys/$DISTRO" ] || { echo "!! keys/$DISTRO is not a directory"; exit 1; }
+mapfile -t KEYFILES < <(find "keys/$DISTRO" -maxdepth 1 -type f -name '*.gpg' | LC_ALL=C sort)
+[ "${#KEYFILES[@]}" -ge 1 ] || { echo "!! keys/$DISTRO carries no *.gpg"; exit 1; }
 
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 ROOT="$WORK/root"
 mkdir -p "$ROOT/DEBIAN" "$ROOT/usr/share/keyrings" "$ROOT/etc/apt/sources.list.d"
 
 cp keys/qmdmm-root.gpg            "$ROOT/usr/share/keyrings/qmdmm-root.gpg"
-cp "keys/$DISTRO/qmdmm-packages.gpg" "$ROOT/usr/share/keyrings/qmdmm-packages.gpg"
+cat "${KEYFILES[@]}" > "$ROOT/usr/share/keyrings/qmdmm-packages.gpg"
 chmod 644 "$ROOT/usr/share/keyrings/"*.gpg
 
 cat > "$ROOT/etc/apt/sources.list.d/qmdmm.sources" <<EOF
@@ -105,6 +140,13 @@ echo "  built with dpkg-deb"
 
 echo "=== built $DEB ==="
 ls -l "$DEB" | awk '{printf "  %s bytes\n", $5}'
+echo "  --- key files ---"
+printf '    %s\n' "${KEYFILES[@]}"
+if [ "${#KEYFILES[@]}" -gt 1 ]; then
+  echo "  note: ${#KEYFILES[@]} key files stacked -- a rotation window is open, and the"
+  echo "        package accepts repositories signed by either subkey until the retired"
+  echo "        file is deleted (see the top of this file)."
+fi
 echo "  --- contents ---"
 ( cd "$ROOT" && find . -type f ! -path './DEBIAN/*' | sort | sed 's/^/    /' )
 echo "  --- control ---"
