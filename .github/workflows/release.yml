@@ -1169,6 +1169,20 @@ jobs:
           - { kind: install, line: fedora, version: rawhide, image: "fedora:rawhide",           script: "consume-dnf-keyring-package.sh" }
           - { kind: install, line: rocky,  version: 10,      image: "rockylinux/rockylinux:10", script: "consume-dnf-keyring-package.sh" }
           - { kind: install, line: alma,   version: 10,      image: "almalinux:10",             script: "consume-dnf-keyring-package.sh" }
+          # pacman: the keyring package, then `pacman-key --populate`. This line
+          # has no key file to point a repository at (no `Signed-By` as on deb,
+          # no `gpgkey=` as on rpm), so the stanza a user writes by hand survives
+          # here and the trust travels entirely inside the package. Both cells on
+          # this line walk that bootstrap - consume-pacman.sh's header says why
+          # the consumer one does too - and what this one adds is the control in
+          # the middle of it: with the files on disk and `--populate` NOT run, the
+          # day-to-day source is refused. One cell per line, because the package's
+          # name, the section a consumer writes and the source's database name are
+          # one string: a package served to the wrong line would install,
+          # populate, and leave the consumer trusting a key that signs nothing it
+          # reads.
+          - { kind: install, line: arch,    version: rolling, image: "archlinux:base",           script: "consume-pacman-keyring-package.sh" }
+          - { kind: install, line: manjaro, version: rolling, image: "manjarolinux/base:latest", script: "consume-pacman-keyring-package.sh" }
     steps:
       - uses: actions/checkout@v7
       - name: Confirm no secret is reachable (a consumer's position)

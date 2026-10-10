@@ -9,9 +9,13 @@
 #
 #   env: SIGNING_KEY_B64, PKGS (stage A's out/*.pkg.tar.zst), OUT, LINE
 #
-# The keyring package that carries the trust root is NOT built here: pacman has
-# no per-repository key scope and the root secret never enters CI, so bootstrapping
-# trust is a trusted-machine step (pacman-key --add + --lsign-key).
+# The keyring package that carries the trust root is NOT built here; it is
+# mkkeyring-pac.sh's, and that file runs off-CI because the root secret never
+# enters a workflow. What the package gives a consumer is `pacman-key --populate
+# qmdmm`, and that local signing is where this line's trust comes from: pacman
+# has no per-repository key scope, so there is no key file to point a repository
+# at the way deb's `Signed-By` and rpm's `gpgkey=` do. What this script signs is
+# the day-to-day source, with the line's operational subkey and nothing else.
 set -euo pipefail
 
 PKGS="${PKGS:?}"; OUT="${OUT:?}"; LINE="${LINE:-pac}"

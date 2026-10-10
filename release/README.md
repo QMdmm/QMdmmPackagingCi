@@ -45,8 +45,8 @@ called differently (its repository was `lab`, so its package database was
 | `publish-macos.sh` | publish: attach the `.dmg` to the product repository's release | CI, publish job | **a token for the product repository** |
 | `publish-tap.sh` | publish: put this release's formula into the Homebrew tap | CI, publish job | **the same token** |
 | `consume-<consumer>.sh` | trust: install and verify as a consumer (`apt`, `dnf`, `pacman`, `apk`) | CI, clean container | nothing |
-| `consume-apt-keyring.sh`, `consume-keyring-package.sh`, `consume-dnf-keyring-package.sh` | trust: the keyring bootstrap | CI, clean container | nothing |
-| `mkkeyring-deb.sh`, `mkkeyring-rpm.sh` | build the root-signed keyring source | **a trusted machine, never CI** | the **root** key |
+| `consume-apt-keyring.sh`, `consume-keyring-package.sh`, `consume-dnf-keyring-package.sh`, `consume-pacman-keyring-package.sh` | trust: the keyring bootstrap | CI, clean container | nothing |
+| `mkkeyring-deb.sh`, `mkkeyring-rpm.sh`, `mkkeyring-pac.sh` | build the root-signed keyring source | **a trusted machine, never CI** | the **root** key |
 | `lib-tools.sh`, `lib-site.sh` | shared helpers | — | — |
 | `lines.tsv` | the line list | — | — |
 
@@ -196,7 +196,7 @@ Two keys, and they are different files rather than two names for one:
   only mean generating a new name and asking every consumer to delete the old
   file by hand.
 
-There is no keyring source on this line, unlike deb and rpm: apk has no
+There is no keyring source on this line, unlike deb, rpm and pacman: apk has no
 convention of a package that carries a key, and the whole consumer action is
 putting that one file in `/etc/apk/keys` and naming the repository. What the
 publish job stages is therefore the key file itself, at `keys/alpine/`, beside
@@ -259,14 +259,20 @@ reasoned about rather than read under the runner's engine.
 * **`rotate-line-local.sh`** — the rotation tool, still in the lab. It is on the
   path a line takes *after* a leak rather than on the path to a first release,
   and its env-file rewriting assumes the lab's layout. It needs its own pass.
-* **The keyring material under `site/`** — the deb archive-keyring packages and
-  the rpm `*-release` packages, all root-signed. These are built off-CI by the
-  `mkkeyring-*.sh` tools above and committed at their published path, **one
-  directory per suite / per version** (`site/debian-keyring/<suite>/`,
-  `site/fedora-keyring/<version>/`): each package bakes the distribution it
-  configures into the consumer's `sources.list.d`, so one directory serving two
-  of them would be able to hand a consumer the wrong one. `mkkeyring-deb.sh`
-  carries the full argument at its top.
+* **The keyring material under `site/`** — the deb archive-keyring packages, the
+  rpm `*-release` packages and the pacman `qmdmm-keyring` package, all
+  root-signed. These are built off-CI by the `mkkeyring-*.sh` tools above and
+  committed at their published path, **one directory per suite / per version**
+  (`site/debian-keyring/<suite>/`, `site/fedora-keyring/<version>/`,
+  `site/arch-keyring/rolling/`). On deb and rpm each package bakes the
+  distribution it configures into the consumer's `sources.list.d`, so one
+  directory serving two of them would be able to hand a consumer the wrong one.
+  On pacman nothing is baked in — `/etc/pacman.conf` is not a package's to own —
+  and the same hazard arrives through a different door: the package's name, the
+  section a consumer writes and the source's database name are one string, so a
+  package served to the wrong line would install, populate, and leave the
+  consumer trusting a key that signs nothing it is about to read.
+  `mkkeyring-deb.sh` and `mkkeyring-pac.sh` carry the full argument at their top.
 * **`genesis-alpine-key.sh`**, the script that mints the Alpine release key and
   says where its name has to agree. It is the step a rotation starts from on
   that line, and a rotation there is not the same shape as on the other seven:
