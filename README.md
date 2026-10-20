@@ -145,8 +145,12 @@ resolves the whole transaction or fails):
   over and in no other way (a player that drops keeps its seat), so an empty
   server on living bots is the end of a game that really ran. Both readings are
   states that hold still: a game of three bots is dealt in a fraction of a
-  second, so "a game is running" is not something a poller can be relied on to
-  see — the peak round count is logged as evidence and deliberately not asserted.
+  second on a build tree, so "a game is running" is not something a poller can be
+  relied on to see — the peak round count is logged as evidence and deliberately
+  not asserted. The wait for the end is three minutes, because the packaged trio
+  inside a container plays roughly ten times slower than the same trio on a build
+  tree (measured: 6 to 11 rounds in the first 12 to 15 seconds on all four lines)
+  and a game is a dozen or two rounds.
   The readings come from the control plane (`--control-port`, `GET /status`) over
   bash's `/dev/tcp`, because none of the four lines is guaranteed to carry an HTTP
   client. **One bot on its own fills no room and must not reach that reading** —

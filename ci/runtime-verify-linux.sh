@@ -277,7 +277,14 @@ if [ "$failed" -eq 0 ]; then
   peak_rounds=0
   full_room_seen=0
   status=''
-  for _ in $(seq 1 200); do
+  # Three minutes, and it is not a guess at a slow machine: a packaged trio deals
+  # a round every second or so inside a container - measured at 6 to 11 rounds in
+  # the first 12 to 15 seconds on all four lines - while the same game on a build
+  # tree deals a round in a tenth of that. A game is a dozen or two rounds, so the
+  # game this waits for ends in well under a minute; the rest is margin. Polling
+  # every quarter second is enough for states that hold still, and leaves the
+  # event loop the room actually runs on alone.
+  for _ in $(seq 1 720); do
     kill -0 "$bot3_pid" 2>/dev/null || break
     status=$(read_status)
     dealt=$(rounds_peak "$status")
@@ -287,7 +294,7 @@ if [ "$failed" -eq 0 ]; then
       played=1
       break
     fi
-    sleep 0.05
+    sleep 0.25
   done
   if ! kill -0 "$bot3_pid" 2>/dev/null; then
     wait "$bot3_pid"
