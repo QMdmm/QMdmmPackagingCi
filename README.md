@@ -138,6 +138,21 @@ resolves the whole transaction or fails):
   loop even when nothing answers, because the client retries. The accepted
   connection is the part that shows the packaged client really got through over
   the packaged stack.
+* The bots then **play a game to its end**. A second bot takes a seat and the
+  room sits one short of full — `players` at `playerNumPerRoom - 1`, `rooms` at 1,
+  nothing dealt — and a third fills it, after which `rooms` and `players` are both
+  0 while all three bots are still running. A room is destroyed when its game is
+  over and in no other way (a player that drops keeps its seat), so an empty
+  server on living bots is the end of a game that really ran. Both readings are
+  states that hold still: a game of three bots is dealt in a fraction of a
+  second, so "a game is running" is not something a poller can be relied on to
+  see — the peak round count is logged as evidence and deliberately not asserted.
+  The readings come from the control plane (`--control-port`, `GET /status`) over
+  bash's `/dev/tcp`, because none of the four lines is guaranteed to carry an HTTP
+  client. **One bot on its own fills no room and must not reach that reading** —
+  that negative control is part of the check, not a one-off experiment, since
+  without it "the room is gone" would also hold on a server that never accepted
+  anybody.
 
 **Stage C** — after bringing the base up to date, installing only the dev package
 by name — on Arch that is the same package stage B installed — and settling the

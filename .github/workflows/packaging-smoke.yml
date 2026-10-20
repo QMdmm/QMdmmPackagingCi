@@ -15,7 +15,8 @@ name: Packaging smoke
 #               package, and it is not signed.
 #   B  runtime  a *clean* container of the same distribution installs only the
 #               runtime package, repairs the dependency set, then proves the
-#               programs load and run.
+#               programs load and run, and lets the bots play a game against the
+#               server to its end.
 #   C  dev      another clean container installs the dev package, repairs the
 #               dependency set, then builds QMdmm's own GUI and Bot from source
 #               against the installed package via find_package(QMdmm6).
