@@ -209,7 +209,7 @@ installed package:
   generation-free `QMdmm::Core`)
 * `add_subdirectory(<QMdmm>/QMdmmGui)`, `(<QMdmm>/QMdmmBot)` and
   `(<QMdmm>/QMdmmServer)` build all three real applications
-* `qt6_standard_project_setup(REQUIRES 6.7)`, mirroring QMdmm's own root
+* `qt6_standard_project_setup(REQUIRES 6.8)`, mirroring QMdmm's own root
 
 Building QMdmm's own application directories is a much harsher test than a
 hand-written consumer could be: it only works if the installed package exports
@@ -498,16 +498,16 @@ the Alpine line's recipe does.
 ## Qt version matrix
 
 `qt-version-matrix.yml` asks a question the packaging stages cannot: QMdmm
-declares `Qt ≥ 6.7`, but its own CI takes Qt from the distribution (6.10.2 on
+declares `Qt ≥ 6.8`, but its own CI takes Qt from the distribution (6.10.2 on
 Ubuntu 26.04), so every release between the declared floor and that one had gone
 untested. The workflow builds QMdmm's own sources and runs `ctest` once per Qt
 LTS that is both still supported and at or above the floor — **6.8 and 6.12**;
-every other Qt 6 release has reached end of life — daily and on demand. 6.5 is
-not in the matrix: its configure failure comes from Qt's own helper (qtbase
-`721cfbd1`, picked to 6.7), so the floor was raised past it rather than worked
-around. 6.7 is absent for the other reason: it is the floor the project
-declares, but it has reached end of life as well, so the matrix starts one
-release above the floor rather than on it.
+every other Qt 6 release has reached end of life — daily and on demand. The
+lowest row is the floor itself: 6.8 is what the project declares, so the matrix
+starts on the floor rather than one release above it. 6.5 and 6.7 are absent for
+the same reason — both are below the floor and both are end of life — 6.5
+having fallen below it first, after a configure failure in Qt's own helper
+(qtbase `721cfbd1`, picked to 6.7) rather than in these sources.
 
 It is a separate file rather than a fourth packaging stage, and it inherits
 nothing from `packaging-smoke.yml`: its `cron` is declared in its own file rather
