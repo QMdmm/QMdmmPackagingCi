@@ -226,17 +226,25 @@ fi
 # And the room has to be playable, not only reachable.
 #
 # A connection says the packaged client got through; this says the package can
-# play. Two readings carry it and both are stable states rather than windows to
-# catch, because a three-bot game is dealt in a fraction of a second and a poller
-# cannot be relied on to see "a game is running".
+# play. Two readings carry it, and they are not the same kind of reading:
 #
 #   the seats   a second bot fills all but one of them: one room, `players` at
 #               room_size - 1, and no game - a room only deals once it is full,
-#               so this reading holds for as long as it takes to look at it.
+#               so this one is a state and holds for as long as it takes to look
+#               at it.
 #   the end     the room is gone again: `rooms` and `players` both 0 while every
 #               bot is still alive. A room is destroyed when its game is over and
 #               in no other way - a player that drops keeps its seat - so an
 #               empty server on living bots is the end of a game that really ran.
+#
+# The end reading is a gap, not a state: a bot signs in again once its match
+# ends, so the empty server lasts only until the bots are back in a new room. How
+# long that gap is belongs to the main repository - it is `nextMatchDelay` in
+# `QMdmmBot/src/main.cpp` - and is not written down here, where it would drift.
+# What matters here is the ratio: the loop below looks every quarter second, so
+# a gap of about a second still gets several looks. Narrowing that interval, or
+# shortening the delay over there, is what would turn this into a reading the
+# poller can miss.
 #
 # The peak round count goes into the summary as evidence and is deliberately not
 # asserted: it is the one reading that moves while the game is being played, so
@@ -281,9 +289,9 @@ if [ "$failed" -eq 0 ]; then
   # a round every second or so inside a container - measured at 6 to 11 rounds in
   # the first 12 to 15 seconds on all four lines - while the same game on a build
   # tree deals a round in a tenth of that. A game is a dozen or two rounds, so the
-  # game this waits for ends in well under a minute; the rest is margin. Polling
-  # every quarter second is enough for states that hold still, and leaves the
-  # event loop the room actually runs on alone.
+  # game this waits for ends in well under a minute; the rest is margin. A
+  # quarter second is inside the gap described above with room to spare, and
+  # leaves the event loop the room actually runs on alone.
   for _ in $(seq 1 720); do
     kill -0 "$bot3_pid" 2>/dev/null || break
     status=$(read_status)
