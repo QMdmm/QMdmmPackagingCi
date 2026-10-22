@@ -157,6 +157,18 @@ rounds_peak() {
   printf '%s' "$1" | grep -oE '"rounds":[0-9]+' | grep -oE '[0-9]+$' | sort -n | tail -1
 }
 
+# Whether any of the bots the game step started is still running. A bot's run is
+# one match: the program leaves when the match it played ends, so the end of a
+# game is read from the bots as well as from the server.
+any_bot_alive() {
+  for pid in $bot_pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # The server calls qFatal() when it cannot listen, which aborts with a non-zero
 # status, so staying alive is what "it runs" means here.
 /usr/bin/QMdmmServer6 -n "$room_size" --control-port "$control_port" \
@@ -232,19 +244,18 @@ fi
 #               room_size - 1, and no game - a room only deals once it is full,
 #               so this one is a state and holds for as long as it takes to look
 #               at it.
-#   the end     the room is gone again: `rooms` and `players` both 0 while every
-#               bot is still alive. A room is destroyed when its game is over and
-#               in no other way - a player that drops keeps its seat - so an
-#               empty server on living bots is the end of a game that really ran.
+#   the end     the room is gone again and so are the bots: `rooms` and `players`
+#               both 0 with every bot having left with code 0. A room is destroyed
+#               when its game is over and in no other way - a player that drops
+#               keeps its seat - so an empty server is a game that really ran, and
+#               a bot's run is one match, so the bots leaving is that same moment
+#               read from the other side.
 #
-# The end reading is a gap, not a state: a bot signs in again once its match
-# ends, so the empty server lasts only until the bots are back in a new room. How
-# long that gap is belongs to the main repository - it is `nextMatchDelay` in
-# `QMdmmBot/src/main.cpp` - and is not written down here, where it would drift.
-# What matters here is the ratio: the loop below looks every quarter second, so
-# a gap of about a second still gets several looks. Narrowing that interval, or
-# shortening the delay over there, is what would turn this into a reading the
-# poller can miss.
+# The end reading is a state rather than a gap, and it takes both halves: a server
+# left empty by a game that ended, and three programs that ended with it. A bot
+# that crashed would leave the same empty server behind, which is what the exit
+# codes separate; a bot that outlived its match would be a program that does not
+# end where the match ends.
 #
 # The peak round count goes into the summary as evidence and is deliberately not
 # asserted: it is the one reading that moves while the game is being played, so
@@ -289,41 +300,36 @@ if [ "$failed" -eq 0 ]; then
   # a round every second or so inside a container - measured at 6 to 11 rounds in
   # the first 12 to 15 seconds on all four lines - while the same game on a build
   # tree deals a round in a tenth of that. A game is a dozen or two rounds, so the
-  # game this waits for ends in well under a minute; the rest is margin. A
-  # quarter second is inside the gap described above with room to spare, and
-  # leaves the event loop the room actually runs on alone.
+  # game this waits for ends in well under a minute; the rest is margin. A quarter
+  # second is many times what the three programs need to leave once their match is
+  # over, and leaves the event loop the room actually runs on alone.
   for _ in $(seq 1 720); do
-    kill -0 "$bot3_pid" 2>/dev/null || break
     status=$(read_status)
     dealt=$(rounds_peak "$status")
     if [ -n "$dealt" ] && [ "$dealt" -gt "$peak_rounds" ]; then peak_rounds=$dealt; fi
     if [ "$(count_of "$status" games)" = 1 ]; then full_room_seen=1; fi
-    if [ "$(count_of "$status" rooms)" = 0 ] && [ "$(count_of "$status" players)" = 0 ]; then
+    if [ "$(count_of "$status" rooms)" = 0 ] && [ "$(count_of "$status" players)" = 0 ] && ! any_bot_alive; then
       played=1
       break
     fi
     sleep 0.25
   done
-  if ! kill -0 "$bot3_pid" 2>/dev/null; then
-    wait "$bot3_pid"
-    rc=$?
-    sed -e 's/^/  err| /' /tmp/bot3.err
-    echo "::error::the third QMdmmBot6 exited with rc=$rc while the room was filling"
-    failed=1
-  elif [ "$played" -eq 1 ]; then
-    echo "### the room played its game to the end, then went away"
+  if [ "$played" -eq 1 ]; then
+    echo "### the room played its game to the end, and the bots left when their match ended"
     echo "### full room seen: $full_room_seen, peak round count: $peak_rounds"
+    for pid in $bot_pids; do
+      wait "$pid" 2>/dev/null
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "::error::a bot left with rc=$rc after its match; a finished match ends a bot with 0"
+        failed=1
+      fi
+    done
   else
-    echo "::error::the room never reached the end of a game"
+    echo "::error::the room never reached the end of a game, or a bot outlasted the one it played"
     echo "### last snapshot: ${status:-none, the control plane did not answer}"
     failed=1
   fi
-  for pid in $bot_pids; do
-    if ! kill -0 "$pid" 2>/dev/null; then
-      echo "::error::a bot exited while the game was played, so the empty server was not the end of one"
-      failed=1
-    fi
-  done
 fi
 
 for extra in /tmp/bot2.err /tmp/bot3.err; do

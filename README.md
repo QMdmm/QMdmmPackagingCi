@@ -141,20 +141,19 @@ resolves the whole transaction or fails):
 * The bots then **play a game to its end**. A second bot takes a seat and the
   room sits one short of full — `players` at `playerNumPerRoom - 1`, `rooms` at 1,
   nothing dealt — and a third fills it, after which `rooms` and `players` are both
-  0 while all three bots are still running. A room is destroyed when its game is
-  over and in no other way (a player that drops keeps its seat), so an empty
-  server on living bots is the end of a game that really ran. The two readings
-  are not the same kind: the first holds still, because a room only deals once it
-  is full, while the second is the gap between two matches — a bot signs in again
-  when its match ends, so the empty server lasts about a second, that length
-  being `nextMatchDelay` in QMdmm's `QMdmmBot/src/main.cpp` rather than anything
-  here. The loop looks every quarter second, so a gap that long still gets
-  several looks; "a game is running" is the reading a poller cannot be relied on
-  to see, which is why the peak round count is logged as evidence and
-  deliberately not asserted. The wait for the end is three minutes, because the
-  packaged trio inside a container plays roughly ten times slower than the same
-  trio on a build tree (measured: 6 to 11 rounds in the first 12 to 15 seconds on
-  all four lines) and a game is a dozen or two rounds.
+  0 with all three bots gone. A room is destroyed when its game is over and in no
+  other way (a player that drops keeps its seat), so an empty server is the end of
+  a game that really ran; a bot's run is one match (`QMdmmBot/src/main.cpp`), so
+  the bots leaving is that same moment read from the other side. Both halves are
+  needed: a bot that crashed would leave the same empty server behind, which is
+  what the exit codes separate — every one of the three has to have left with 0 —
+  and a bot that outlived its match would be a program that does not end where its
+  match does. "A game is running" is the reading a poller cannot be relied on to
+  see, which is why the peak round count is logged as evidence and deliberately
+  not asserted. The wait for the end is three minutes, because the packaged trio
+  inside a container plays roughly ten times slower than the same trio on a build
+  tree (measured: 6 to 11 rounds in the first 12 to 15 seconds on all four lines)
+  and a game is a dozen or two rounds.
   The readings come from the control plane (`--control-port`, `GET /status`) over
   bash's `/dev/tcp`, because none of the four lines is guaranteed to carry an HTTP
   client. **One bot on its own fills no room and must not reach that reading** —
