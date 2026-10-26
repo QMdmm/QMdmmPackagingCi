@@ -21,6 +21,10 @@ name: Packaging smoke
 #               dependency set, then builds QMdmm's own GUI and Bot from source
 #               against the installed package via find_package(QMdmm6).
 #
+# Ahead of A there is one more job, `resolve`: it turns the ref this run was
+# given into the single commit every stage then fetches, so a row held in the
+# runner queue for hours still builds the tree the early rows built.
+#
 # "Repairs the dependency set" reads differently per line, because the package
 # managers differ: apt can leave a half-installed state to repair, dnf, pacman
 # and apk cannot. Where there is nothing to repair, the settle-up is a database
@@ -84,12 +88,13 @@ on:
   workflow_dispatch:
     inputs:
       qmdmm_ref:
-        # This value is handed straight to `git fetch --depth 1 origin '<ref>'`
-        # in every job that fetches the source, and fetch resolves a ref name or
-        # a full object name and nothing else. An abbreviated SHA is neither, so
-        # a short SHA fails at that job's checkout - an error that reads as a
-        # checkout problem rather than as the input it is. Branch and tag names
-        # are fine; a commit has to be written out in full.
+        # This value goes to ci/resolve-ref.sh, which turns it into the one
+        # commit the whole run then fetches. A branch name is resolved to that
+        # commit at the start of the run, not once per job; a tag name and a
+        # full object name are passed through, the first because it does not
+        # move and the second because it is already a commit. An abbreviated
+        # SHA is none of those and is refused, by name, before anything is
+        # built - a commit has to be written out in full.
         description: 'QMdmm ref (branch, tag, or full 40-character commit SHA) to package and verify'
         required: true
         default: 'main'
@@ -108,7 +113,7 @@ on:
     # the field is written as a UTC time: the run should land at 08:00 UTC+8
     # (00:00 UTC), and the field currently sits an hour earlier to offset the
     # lateness described below.
-    # Scheduled runs have no inputs at all, which is what the QMDMM_REF /
+    # Scheduled runs have no inputs at all, which is what the REQUESTED_REF /
     # QMDMM_BUILD_TYPE defaults below exist for.
     #
     # The trigger is workflow-wide, so a scheduled run carries every job in this
@@ -145,7 +150,12 @@ env:
   # inputs at all, so both fall back to `main` - the branch the packaging
   # support was merged into - and Release. The event test is there so the
   # fallback does not depend on how an absent `inputs` object evaluates.
-  QMDMM_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.qmdmm_ref || 'main' }}
+  #
+  # `REQUESTED_REF` is what the run asked for; `QMDMM_REF`, the value the stage
+  # scripts fetch, is not here at all - the `resolve` job below works it out
+  # once and the jobs that fetch the source take it from there. See that job
+  # for why the difference matters.
+  REQUESTED_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.qmdmm_ref || 'main' }}
   QMDMM_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type || 'Release' }}
   # Containers start with LANG unset, so Qt switches itself to C.UTF-8 and says
   # so on every launch. Setting it here keeps that noise out of the probe logs.
@@ -189,9 +199,44 @@ defaults:
 
 jobs:
 
+  # ================================================================ resolve
+  # One ref, one answer, for the whole run.
+  #
+  # A job starts when a runner is free, not when the run does, and the macOS
+  # arm64 queue can hold a row for most of a day (2026-10-26: 13h53m, with
+  # GitHub's own notice about capacity constraints). A branch name handed to
+  # each job's `git fetch` therefore names a different commit to the rows that
+  # started early than to the ones that started late: stage A packaged a bottle
+  # from one tree, stage C fetched a later `main` and compiled the consumer
+  # against it, and the mismatch came out as `no member named ...` in the
+  # sources - a red that reads as a code defect and is not one.
+  #
+  # ci/resolve-ref.sh turns the requested ref into the commit every stage then
+  # fetches. A tag name and a full sha come back unchanged, because neither can
+  # move and the Homebrew stage reads a tag's pin off the tag itself.
+  #
+  # Only the jobs that fetch the source take this. Stage B installs stage A's
+  # artifacts rather than fetching anything, so its tree is whatever those
+  # artifacts carry.
+  resolve:
+    name: "resolve the ref"
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.resolve.outputs.ref }}
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      - name: Resolve
+        id: resolve
+        run: ci/resolve-ref.sh
+
   # ================================================================= stage A
   pack:
     name: "A pack (${{ matrix.dist.name }})"
+    needs: resolve
+    env:
+      QMDMM_REF: ${{ needs.resolve.outputs.ref }}
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.dist.image }}
@@ -369,8 +414,10 @@ jobs:
   # ================================================================= stage C
   verify-dev:
     name: "C dev (${{ matrix.dist.name }})"
-    needs: pack
+    needs: [pack, resolve]
     if: always() && !cancelled()
+    env:
+      QMDMM_REF: ${{ needs.resolve.outputs.ref }}
     runs-on: ubuntu-latest
     container:
       image: ${{ matrix.dist.image }}
@@ -494,6 +541,9 @@ jobs:
   # did not build - and that is what release.yml's merge-brew job is for.
   pack-brew:
     name: "A pack (${{ matrix.dist.name }})"
+    needs: resolve
+    env:
+      QMDMM_REF: ${{ needs.resolve.outputs.ref }}
     runs-on: macos-latest
     strategy:
       fail-fast: false
@@ -567,6 +617,9 @@ jobs:
   # they are copied.
   pack-macos:
     name: "A pack (macos)"
+    needs: resolve
+    env:
+      QMDMM_REF: ${{ needs.resolve.outputs.ref }}
     runs-on: macos-latest
     steps:
       - name: Checkout this harness
@@ -748,7 +801,9 @@ jobs:
 
   verify-dev-brew:
     name: "C dev (${{ matrix.dist.name }})"
-    needs: pack-brew
+    needs: [pack-brew, resolve]
+    env:
+      QMDMM_REF: ${{ needs.resolve.outputs.ref }}
     runs-on: macos-latest
     strategy:
       fail-fast: false

@@ -460,8 +460,17 @@ clock time. The four runs are recorded in the note on the schedule in the
 workflow.
 
 A scheduled run has no inputs at all, so the ref and the build type come from
-the `QMDMM_REF` / `QMDMM_BUILD_TYPE` defaults in `env` — which is also why those
-two are `env` entries rather than `inputs` read directly at the point of use.
+the `REQUESTED_REF` / `QMDMM_BUILD_TYPE` defaults in `env` — which is also why
+those two are `env` entries rather than `inputs` read directly at the point of
+use.
+
+That ref is turned into a commit once per run, by the `resolve` job, and every
+stage that fetches the source fetches that commit. The reason it is not done per
+job: a job starts when a runner is free, not when the run does, and the macOS
+arm64 queue has held a row for the better part of a day (2026-10-26: 13h53m
+behind a capacity constraint). Resolving per job let stage A package a bottle
+from one tree while stage C compiled a later `main` against it, which failed as
+`no member named ...` in the sources — a red that reads as a defect in the code.
 
 Manually:
 
@@ -473,12 +482,15 @@ gh run watch
 Inputs (dispatched runs only):
 
 * `qmdmm_ref` — the QMdmm ref to package and verify, given as a branch name, a
-  tag name or a full 40-character commit SHA. The value goes straight into
-  `git fetch --depth 1 origin '<ref>'`, which resolves ref names and complete
-  object names and nothing else, so an abbreviated SHA is rejected at checkout
-  in every job that fetches the source — an error that reads as a checkout
-  failure rather than as the input it is. Defaults to `main`, which the
-  packaging work (`packaging-consumer-support`) was merged into.
+  tag name or a full 40-character commit SHA. A branch name is resolved to the
+  commit it points at when the run starts and every stage fetches that commit,
+  so the run builds one tree however long its rows wait (see the note above on
+  the `resolve` job). A tag name is passed through unchanged — it cannot move,
+  and the Homebrew stage reads the formula's pin off the tag itself — and so is
+  a full SHA. An abbreviated SHA is neither, and the `resolve` job refuses it by
+  name, before anything is built, rather than letting it fail later as a
+  checkout. Defaults to `main`, which the packaging work
+  (`packaging-consumer-support`) was merged into.
 * `build_type` — CMake build type, default `Release`.
 
 Images: `debian:sid`, `fedora:latest`, `archlinux:base` and `alpine:latest`

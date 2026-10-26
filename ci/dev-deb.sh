@@ -50,3 +50,4 @@ git init qmdmm-src
 git -C qmdmm-src remote add origin "$QMDMM_REPO"
 git -C qmdmm-src fetch --depth 1 origin "$QMDMM_REF"
 git -C qmdmm-src checkout --detach FETCH_HEAD
+echo "QMdmm HEAD: $(git -C qmdmm-src log --oneline -1)"
