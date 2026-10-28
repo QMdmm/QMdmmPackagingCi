@@ -161,6 +161,14 @@ resolves the whole transaction or fails):
   without it "the room is gone" would also hold on a server that never accepted
   anybody.
 
+  The two macOS faces take the same three readings with the same window, so this
+  list is not Linux-only. There the programs run natively rather than inside a
+  container: a release build on a development machine finishes a whole game — 21
+  rounds — in about a tenth of a second, so on that line the window is margin
+  rather than a bound, and the peak round count will usually read zero because
+  the game is over before the first look arrives. It stays unasserted for exactly
+  that reason.
+
 **Stage C** — after bringing the base up to date, installing only the dev package
 by name — on Arch that is the same package stage B installed — and settling the
 dependency set the same way:
@@ -427,7 +435,11 @@ Three scripts, two of them this line's own:
   copy that moved.
 * `ci/runtime-verify-macos.sh` with `MACOS_FACE=dmg` — the verification the
   Homebrew line runs, with the programs read out of the bundle and the dependency
-  assertion pointing the other way.
+  assertion pointing the other way. Both faces play a game to its end on this
+  line too: the bot's accepted connection only says the packaged client got
+  through, and the regressions that reach a user's machine — a reconnect loop, an
+  exit status that stopped meaning "the match ended", a waiting window that moved
+  — are only visible once a match really runs.
 
 Stage B is the one place the two architectures part company, and it is a matrix
 of two rows: `macos-latest` for arm64 and `macos-26-intel` for x86_64. A

@@ -22,9 +22,10 @@
 # above is explicit rather than inferred.
 #
 # What does NOT follow the face is the rest: the GUI has to survive, its QML has
-# to resolve out of its own resources, the server has to listen and the bot has
-# to be seen connecting to it. Those are the same reading on both faces and on
-# the four Linux lines, which is why they are one file rather than two.
+# to resolve out of its own resources, the server has to listen, the bot has to
+# be seen connecting to it, and the bots have to play a game to its end. Those are
+# the same reading on both faces and on the four Linux lines, which is why they
+# are one file rather than two.
 #
 # Three things are macOS-specific and have no counterpart in the Linux script:
 #
@@ -263,10 +264,56 @@ if [ "${qml_hits:-0}" -lt 1 ]; then
   failed=1
 fi
 
+# Where the readings below come from, and the size of a room. The room size is
+# handed to the server rather than read back out of it: `-d` prints only what
+# differs from the defaults, so an unset key leaves nothing to read, and the bot
+# count and the room's own size have to be the same number or no game is ever
+# dealt. 3 is the shipped default. The control plane is the only place a
+# verification can read a count out of a running server, and `--control-port`
+# binds it to the loopback interface and to nothing else.
+control_port=6368
+room_size=3
+
+# One connection per reading: the plane answers a single request and closes, so
+# there is no keep-alive to negotiate. bash's /dev/tcp is the client because a
+# probe should not need a package installed for it - the four Linux lines read
+# their snapshots the same way - and `$BASH` rather than a bare `bash` so this
+# works whatever shell the step was started with. Of the answer, the headers end
+# with a blank line and the body carries no trailing newline, so the last line is
+# the snapshot. gtimeout, not timeout: this platform has no `timeout` of its own,
+# which is why the workflow installs coreutils.
+read_status() {
+  gtimeout 5 "$BASH" -c "exec 3<>/dev/tcp/127.0.0.1/${control_port}; printf 'GET /status HTTP/1.0\r\n\r\n' >&3; cat <&3" 2>/dev/null | tr -d '\r' | tail -1
+}
+
+# Every key of the snapshot is a count or a list of rooms, so a count is the
+# first `"key":<digits>` in it. `rounds` repeats once per room, which is why the
+# busiest room's is read as the largest rather than the first.
+count_of() {
+  printf '%s' "$1" | grep -oE "\"$2\":[0-9]+" | grep -oE '[0-9]+$' | head -1
+}
+rounds_peak() {
+  printf '%s' "$1" | grep -oE '"rounds":[0-9]+' | grep -oE '[0-9]+$' | sort -n | tail -1
+}
+
+# Whether any of the bots the game step started is still running. A bot's run is
+# one match: the program leaves when the match it played ends, so the end of a
+# game is read from the bots as well as from the server.
+bot_pids=''
+any_bot_alive() {
+  for pid in $bot_pids; do
+    if kill -0 "$pid" 2>/dev/null; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 # The server calls qFatal() when it cannot listen, so staying up is what "it
 # runs" means here - plus, now that there is somewhere to look, that something
 # really is listening.
-"${progs[1]}" >/tmp/server.out 2>/tmp/server.err &
+"${progs[1]}" -n "$room_size" --control-port "$control_port" \
+  >/tmp/server.out 2>/tmp/server.err &
 server_pid=$!
 for _ in $(seq 1 40); do
   kill -0 "$server_pid" 2>/dev/null || break
@@ -293,6 +340,7 @@ fi
 # tables rather than from the bot's own output.
 "${progs[2]}" --host=qmdmm://localhost:6366 >/tmp/bot.out 2>/tmp/bot.err &
 bot_pid=$!
+bot_pids="$bot_pid"
 bot_connected=0
 for _ in $(seq 1 60); do
   kill -0 "$bot_pid" 2>/dev/null || break
@@ -319,6 +367,175 @@ fi
 if fatal /tmp/bot.err; then
   echo "::error::QMdmmBot6 reported a fatal loading or crash message"
   failed=1
+fi
+
+# ---------------------------------------------------------------------------
+# And the room has to be playable, not only reachable.
+#
+# A connection says the packaged client got through; this says the package can
+# play. Both readings are the four Linux lines' own, because neither is about a
+# package manager - the question is the same one here, and until this file asked
+# it the whole class of regressions a game exposes (a reconnect loop, an exit
+# status that stopped meaning "the match ended", a waiting window that moved) was
+# invisible on the one platform where the bundle is the product:
+#
+#   the seats   a second bot fills all but one of them: one room, `players` at
+#               room_size - 1, and no game - a room only deals once it is full,
+#               so this one is a state and holds for as long as it takes to look
+#               at it.
+#   the end     the room is gone again and so are the bots: `rooms` and `players`
+#               both 0 with every bot having left with code 0. A room is
+#               destroyed when its game is over and in no other way - a player
+#               that drops keeps its seat - so an empty server is a game that
+#               really ran, and a bot's run is one match, so the bots leaving is
+#               that same moment read from the other side. Both halves are
+#               needed: a bot that crashed would leave the same empty server
+#               behind, which is what the exit codes separate.
+#
+# The peak round count goes into the summary as evidence and is deliberately not
+# asserted: it is the one reading that moves while the game is being played, so
+# it is the one a slow probe can miss.
+#
+# Only while everything above held - otherwise the waits below can only time out.
+if [ "$failed" -eq 0 ]; then
+  "${progs[2]}" --host=qmdmm://localhost:6366 >/tmp/bot2.out 2>/tmp/bot2.err &
+  bot2_pid=$!
+  bot_pids="$bot_pids $bot2_pid"
+  waiting_for=$((room_size - 1))
+  seats_ok=0
+  status=''
+  for _ in $(seq 1 100); do
+    kill -0 "$bot2_pid" 2>/dev/null || break
+    status=$(read_status)
+    if [ "$(count_of "$status" rooms)" = 1 ] && [ "$(count_of "$status" players)" = "$waiting_for" ]; then
+      seats_ok=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "$seats_ok" -eq 1 ]; then
+    echo "### a room holds $waiting_for of $room_size seats and has dealt nothing yet"
+    echo "### $status"
+  else
+    echo "::error::the room never held $waiting_for seated bots; the game cannot start without them"
+    echo "### last snapshot: ${status:-none, the control plane did not answer}"
+    failed=1
+  fi
+fi
+
+if [ "$failed" -eq 0 ]; then
+  "${progs[2]}" --host=qmdmm://localhost:6366 >/tmp/bot3.out 2>/tmp/bot3.err &
+  bot3_pid=$!
+  bot_pids="$bot_pids $bot3_pid"
+  played=0
+  peak_rounds=0
+  full_room_seen=0
+  status=''
+  # Three minutes of quarter-second looks, the same number the Linux lines use,
+  # and it is not a guess at this machine either: the packaged trio inside a
+  # container deals a round every second or so (6 to 11 rounds in the first 12 to
+  # 15 seconds, on all four lines), while the same trio on a release build tree
+  # finishes a whole game - 21 rounds - in a tenth of a second. That reading is
+  # why the two lines below will usually print zeros here: the game is over
+  # before the first look arrives, which is exactly why neither is asserted. The
+  # window is the slowest place this check runs, with room to spare for a shared
+  # runner; the macOS runner's own reading belongs here once a run reports it.
+  #
+  # A quarter second between looks is many times what three programs need to
+  # leave once their match is over, and it leaves the event loop the room runs on
+  # alone.
+  for _ in $(seq 1 720); do
+    status=$(read_status)
+    dealt=$(rounds_peak "$status")
+    if [ -n "$dealt" ] && [ "$dealt" -gt "$peak_rounds" ]; then peak_rounds=$dealt; fi
+    if [ "$(count_of "$status" games)" = 1 ]; then full_room_seen=1; fi
+    if [ "$(count_of "$status" rooms)" = 0 ] && [ "$(count_of "$status" players)" = 0 ] && ! any_bot_alive; then
+      played=1
+      break
+    fi
+    sleep 0.25
+  done
+  if [ "$played" -eq 1 ]; then
+    echo "### the room played its game to the end, and the bots left when their match ended"
+    echo "### full room seen: $full_room_seen, peak round count: $peak_rounds"
+    for pid in $bot_pids; do
+      wait "$pid" 2>/dev/null
+      rc=$?
+      if [ "$rc" -ne 0 ]; then
+        echo "::error::a bot left with rc=$rc after its match; a finished match ends a bot with 0"
+        failed=1
+      fi
+    done
+  else
+    echo "::error::the room never reached the end of a game, or a bot outlasted the one it played"
+    echo "### last snapshot: ${status:-none, the control plane did not answer}"
+    failed=1
+  fi
+fi
+
+for extra in /tmp/bot2.err /tmp/bot3.err; do
+  if [ -f "$extra" ] && fatal "$extra"; then
+    sed -e 's/^/  err| /' "$extra"
+    echo "::error::$extra reported a fatal loading or crash message"
+    failed=1
+  fi
+done
+
+# ---------------------------------------------------------------------------
+# The negative control.
+#
+# A single bot fills no room, so the end-of-game reading must not arrive here.
+# Without this, "the room is gone" would also be satisfied by a server that never
+# accepted anybody, and the criterion above would have been part of every green
+# run without ever having been shown to tell the two apart. What it waits for is
+# structural: one bot short of a full room means no game is dealt at all.
+if [ "$failed" -eq 0 ]; then
+  for pid in $bot_pids; do
+    kill "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+  done
+  bot_pids=''
+  sleep 0.5
+  "${progs[2]}" --host=qmdmm://localhost:6366 >/tmp/bot-alone.out 2>/tmp/bot-alone.err &
+  alone_pid=$!
+  bot_pids="$alone_pid"
+  seated=0
+  status=''
+  for _ in $(seq 1 100); do
+    kill -0 "$alone_pid" 2>/dev/null || break
+    status=$(read_status)
+    if [ "$(count_of "$status" rooms)" = 1 ] && [ "$(count_of "$status" players)" = 1 ]; then
+      seated=1
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "$seated" -ne 1 ]; then
+    echo "::error::one bot on its own never took a seat; the reading above cannot be read as a game"
+    echo "### last snapshot: ${status:-none, the control plane did not answer}"
+    failed=1
+  else
+    ended_alone=0
+    for _ in $(seq 1 60); do
+      status=$(read_status)
+      if [ "$(count_of "$status" rooms)" = 0 ] && [ "$(count_of "$status" players)" = 0 ]; then
+        ended_alone=1
+        break
+      fi
+      sleep 0.1
+    done
+    if [ "$ended_alone" -eq 1 ]; then
+      echo "::error::a single bot reached the end-of-game reading, so that reading proves nothing"
+      failed=1
+    else
+      echo "### one bot on its own sits in a room that never fills, which is what the reading above is not"
+    fi
+  fi
+  if fatal /tmp/bot-alone.err; then
+    sed -e 's/^/  err| /' /tmp/bot-alone.err
+    echo "::error::the single bot reported a fatal loading or crash message"
+    failed=1
+  fi
 fi
 
 # The server's own log is the other side of that connection. Where it lives is
@@ -387,7 +604,13 @@ fi
   # the one block whose whole purpose is to be read back, so it goes to both.
 } | tee -a "$GITHUB_STEP_SUMMARY"
 
-kill "$bot_pid" "$server_pid" 2>/dev/null
+# Whichever way the run went, nothing started here outlives it. `bot_pids` is
+# empty when the negative control cleared it; a bare `wait` reaps whatever is
+# left and does not fail on a pid that is already gone.
+for pid in $bot_pids; do
+  kill "$pid" 2>/dev/null
+done
+kill "$server_pid" 2>/dev/null
 wait 2>/dev/null
 
 [ "$failed" -eq 0 ]
