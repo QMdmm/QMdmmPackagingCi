@@ -351,6 +351,22 @@ Three things are macOS's own:
   about the bottle at all, so the install log is required to show a pour *and* to
   show no source build.
 
+  Pouring the right bottle is still not the whole pairing. A bottle is linked
+  against the Qt of the machine that built it, and stages B and C install Qt from
+  their own runner's index; the formula names `qtbase` and the other two modules
+  without a version, so nothing ties the two together. While a fleet is
+  mid-rollout they really do differ — one run had stage A's job pour
+  `qtbase 6.12.0_1` and the stage B job that followed minutes later pour
+  `6.11.2_1`, same macOS, same architecture — and what that produces is dyld's
+  `Symbol not found`, read as a defect in the product. So both consuming stages
+  compare the Qt the bottle records for itself (its own `INSTALL_RECEIPT.json`,
+  i.e. stage A's bytes) with what `brew list --versions` says after the pour, and
+  stop with both numbers in one sentence when they disagree. That check is
+  `ci/lib-brew-qt.sh`, sourced by both stages; a difference in the revision
+  suffix alone is reported rather than failed, since it is a rebuild of the same
+  Qt. Nothing is pinned — the formula stays versionless, and Homebrew has no way
+  to install an older Qt anyway.
+
 The platform verification is `ci/runtime-verify-macos.sh` and the pair
 `ci/build-verify-macos.sh` + `ci/run-verify-macos.sh` — one script per platform
 rather than per face, as on Linux, and tools differ in five places with one

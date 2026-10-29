@@ -165,6 +165,16 @@ if brew list --versions qt >/dev/null 2>&1; then
 fi
 echo "the three Qt sub-modules are here and the meta formula is not"
 
+# ... and the Qt they are has to be the one this bottle was linked against. The
+# two numbers come from different machines - the bottle's from stage A's runner,
+# these from this one - and nothing in the formula ties them together, so a fleet
+# mid-rollout hands the two stages different indexes. Saying so here is what keeps
+# the next failure from being dyld's "Symbol not found", which reads as a defect
+# in QMdmm. Both readings are facts rather than expectations, and neither is a
+# pin: the formula stays versionless on purpose. See ci/lib-brew-qt.sh.
+. "$(dirname "$0")/lib-brew-qt.sh"
+brew_assert_bottle_qt_is_the_runners "serve/$bottle_file"
+
 # The recipe's own test. Nothing else in this harness runs it: `brew install`
 # does not call a formula's `test do` block, and none of the stages did either,
 # so the block was a claim nobody checked - it names one program and one option,

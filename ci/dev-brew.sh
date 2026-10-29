@@ -89,6 +89,15 @@ if ! grep -qF "Pouring $bottle_file" "$pour_log"; then
   exit 1
 fi
 
+# The Qt the bottle was linked against, against the Qt this runner installed - the
+# same reading stage B takes just before it runs the recipe's test, and here before
+# the consumer builds against what was poured. Both numbers are facts about two
+# different machines and the formula names no version, so a fleet mid-rollout makes
+# them disagree; what this buys is the sentence that says so, instead of dyld's
+# "Symbol not found" arriving as though QMdmm were at fault. See ci/lib-brew-qt.sh.
+. "$(dirname "$0")/lib-brew-qt.sh"
+brew_assert_bottle_qt_is_the_runners "serve/$bottle_file"
+
 # The toolchain this stage is allowed to assume: what the runner image already
 # carries, which on macOS is Homebrew's cmake and ninja rather than anything a
 # base image would have been asked to install. The Linux lines get their
