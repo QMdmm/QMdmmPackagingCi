@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
 #
-# The Qt pairing a bottle and the machine pouring it have to agree about, in one
-# place because both consuming stages ask it: ci/runtime-brew.sh before it runs
-# the recipe's test block, ci/dev-brew.sh before the consumer builds against what
-# was poured.
+# The Qt pairing a bottle and the machines around it have to agree about, in one
+# place because all three Homebrew stages source it: ci/pack-brew.sh for the index
+# refresh below, ci/runtime-brew.sh before it runs the recipe's test block, and
+# ci/dev-brew.sh before the consumer builds against what was poured.
 #
 # Why the question exists at all. Stage A bottles on one runner and stage B / C
 # pour on others, and Qt reaches each of them from its own machine's Homebrew
 # index: the formula names `qtbase`, `qtdeclarative` and `qtwebsockets` with no
 # version, so nothing ties the Qt a bottle was linked against to the Qt the
-# pouring runner installs beside it. While a fleet is mid-rollout those are two
-# different indexes - measured once in one run: stage A poured `qtbase 6.12.0_1`
-# and the stage B job that followed minutes later poured `6.11.2_1`, same macOS,
-# same architecture - and a bottle built against one does not load against the
-# other. What the stage then reports is dyld's
+# pouring runner installs beside it. And those indexes are not the same one - a
+# runner image carries the index as it stood when the image was built, and the
+# images of a single run are not built together. Measured on this line twice. One
+# run: stage A poured `qtbase 6.12.0_1` and the stage B job minutes later poured
+# `6.11.2_1`. A later one, same attempt, all three stages: A `6.11.2_1`, B
+# `6.12.0_1`, C `6.11.2_1`. A bottle built against one does not load against the
+# other, and what the stage reports is dyld's
 #
 #   dyld: Symbol not found: __ZN8QVariantC1EO7QString
 #
-# which reads as a defect in QMdmm rather than as two runners disagreeing about a
-# dependency. This file is the sentence that says so first.
+# which reads as a defect in QMdmm rather than as three runners built at three
+# times disagreeing about a dependency. This file is both halves of the answer:
+# the refresh that keeps it from happening, and the sentence for when it happens
+# anyway.
 #
 # It is the same shape as the ref skew ci/resolve-ref.sh closed: the pieces of one
 # run have to come from one tree. There the tree was in question and the toolchain
@@ -31,6 +35,36 @@
 # i.e. a fact about this machine rather than what its index was expected to
 # resolve to. Nothing here is pinned: the point is to report the pairing, not to
 # make one happen, and Homebrew has no way to install an older Qt anyway.
+#
+# The file has two halves, and they are not the same job. brew_refresh_index below
+# is what keeps the stages from resolving different Qts in the first place;
+# everything under it is what says so when they do anyway.
+
+# The index every reading in this file is taken against, refreshed once at the top
+# of each stage before anything is installed.
+#
+# A runner image carries Homebrew's index as it stood when the image was built, and
+# the images are not rebuilt together: measured in one run of this line, stage A's
+# runner resolved qtbase 6.11.2_1, the stage B runner that followed minutes later
+# resolved 6.12.0_1, and the stage C runner 6.11.2_1 again - three machines, one
+# attempt, two indexes. Refreshing first makes all three read the index as it
+# stands now, so the Qt a bottle is built against and the Qt the pouring runner
+# installs come from one answer rather than from three image ages.
+#
+# Explicit rather than left to Homebrew's own before-an-install update: the
+# workflow sets HOMEBREW_NO_AUTO_UPDATE, so the one refresh happens here, at a
+# point this file can name, once per stage.
+#
+# A refresh that fails leaves the stage about to resolve its dependencies from an
+# index of unknown age, which is the skew above arriving silently - so it stops
+# here rather than carrying on.
+brew_refresh_index() {
+  if ! brew update; then
+    echo "::error::the Homebrew index could not be refreshed, so this stage would resolve its Qt dependencies from whatever index its runner image was built with. That is how stage A and the stage pouring its bottle come to disagree, and the disagreement does not announce itself: it surfaces later as dyld's \"Symbol not found\", or as a stage that passes about a pairing no user is handed."
+    exit 1
+  fi
+  echo "the index this stage resolves dependencies against is now current"
+}
 
 # The Qt versions a bottle records for itself, one "name<TAB>pkg_version" per
 # line. The receipt also names 30-odd other dependencies; only the Qt ones are

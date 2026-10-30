@@ -352,20 +352,30 @@ Three things are macOS's own:
   show no source build.
 
   Pouring the right bottle is still not the whole pairing. A bottle is linked
-  against the Qt of the machine that built it, and stages B and C install Qt from
-  their own runner's index; the formula names `qtbase` and the other two modules
-  without a version, so nothing ties the two together. While a fleet is
-  mid-rollout they really do differ — one run had stage A's job pour
-  `qtbase 6.12.0_1` and the stage B job that followed minutes later pour
-  `6.11.2_1`, same macOS, same architecture — and what that produces is dyld's
-  `Symbol not found`, read as a defect in the product. So both consuming stages
-  compare the Qt the bottle records for itself (its own `INSTALL_RECEIPT.json`,
-  i.e. stage A's bytes) with what `brew list --versions` says after the pour, and
-  stop with both numbers in one sentence when they disagree. That check is
-  `ci/lib-brew-qt.sh`, sourced by both stages; a difference in the revision
-  suffix alone is reported rather than failed, since it is a rebuild of the same
-  Qt. Nothing is pinned — the formula stays versionless, and Homebrew has no way
-  to install an older Qt anyway.
+  against the Qt of the machine that built it, and the formula names `qtbase` and
+  the other two modules without a version, so the Qt installed beside it is
+  whatever the pouring runner's Homebrew index resolves to. A runner image keeps
+  the index it was built with, and the images of one run are not built together:
+  measured on this line in one attempt, stage A's runner resolved
+  `qtbase 6.11.2_1`, the stage B runner that followed minutes later `6.12.0_1`,
+  and the stage C runner `6.11.2_1` again. A bottle built against one of those
+  does not load against another, and what that produces is dyld's
+  `Symbol not found`, read as a defect in the product.
+
+  So each of the three stages refreshes that index once, before it installs
+  anything — `brew_refresh_index` in `ci/lib-brew-qt.sh`, which is also why the
+  workflow turns Homebrew's own before-an-install update off: the refresh then
+  happens exactly once per stage, where the script can name it. This is the same
+  thing the four Linux lines do to their images with `dist-upgrade` / `upgrade
+  --available` / `upgrade`, and the only line where it has to be asked for.
+  Refreshing narrows the disagreement to a Qt release landing between stage A and
+  stage B; what is left is reported rather than mistaken for a defect: both
+  consuming stages compare the Qt the bottle records for itself (its own
+  `INSTALL_RECEIPT.json`, i.e. stage A's bytes) with what `brew list --versions`
+  says after the pour, and stop with both numbers in one sentence when they
+  disagree. A difference in the revision suffix alone is reported rather than
+  failed, since it is a rebuild of the same Qt. Nothing is pinned — the formula
+  stays versionless, and Homebrew has no way to install an older Qt anyway.
 
 The platform verification is `ci/runtime-verify-macos.sh` and the pair
 `ci/build-verify-macos.sh` + `ci/run-verify-macos.sh` — one script per platform

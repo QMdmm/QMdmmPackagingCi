@@ -23,6 +23,11 @@
 # has Homebrew, git, cmake and ninja, and Qt is *not* in it (the toolset's
 # brew.common_packages has no qt), which is what makes "install from source"
 # mean what it says here rather than quietly reusing something preinstalled.
+# What the image does not come with is a current index - it carries whatever
+# was current when the image was built, and the stages that pour this bottle run
+# on other images built at other times - so the first thing this stage does is
+# refresh it, which is this line's version of the four Linux lines' image
+# refresh.
 #
 # The formula lives in QMdmm/homebrew-qmdmm and not in this repository, on
 # purpose: this stage must verify the recipe a user gets, and a second copy
@@ -33,6 +38,15 @@
 #                  e.g. arm64_sequoia. Declared by the workflow's matrix and
 #                  asserted below against Homebrew's own answer.
 set -euxo pipefail
+
+# The Qt this row builds against comes from this machine's Homebrew index, and the
+# rows that pour the bottle run on other images carrying other indexes: refresh
+# once here, before anything is installed, so every stage of the line resolves its
+# dependencies from one index rather than from its own image's age. This is the
+# same thing the four Linux lines do with dist-upgrade / upgrade --available /
+# upgrade, and the only line where it has to be asked for by name.
+. "$(dirname "$0")/lib-brew-qt.sh"
+brew_refresh_index
 
 # `brew bottle` is a developer command, and Homebrew turns developer mode on by
 # itself the first time one is called - once, with a warning, in the middle of

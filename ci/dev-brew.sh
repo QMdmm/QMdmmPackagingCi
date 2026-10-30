@@ -19,6 +19,13 @@
 #     vocabulary.
 set -euxo pipefail
 
+# The same clean start stage B makes, including the same one index: the bottle was
+# built against the Qt stage A's index resolved to, and this image would otherwise
+# hand the consumer whatever Qt it was built beside. Refreshed before anything is
+# installed, as the four Linux lines refresh their images. See ci/lib-brew-qt.sh.
+. "$(dirname "$0")/lib-brew-qt.sh"
+brew_refresh_index
+
 for module in qt qtbase qtdeclarative qtwebsockets; do
   if ls /opt/homebrew/opt 2>/dev/null | grep -qx "$module"; then
     echo "::error::Qt ($module) is already installed on this runner, so what the dev face provides could not be told from what the image provided"
@@ -95,7 +102,6 @@ fi
 # different machines and the formula names no version, so a fleet mid-rollout makes
 # them disagree; what this buys is the sentence that says so, instead of dyld's
 # "Symbol not found" arriving as though QMdmm were at fault. See ci/lib-brew-qt.sh.
-. "$(dirname "$0")/lib-brew-qt.sh"
 brew_assert_bottle_qt_is_the_runners "serve/$bottle_file"
 
 # The toolchain this stage is allowed to assume: what the runner image already

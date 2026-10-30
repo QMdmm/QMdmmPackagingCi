@@ -14,6 +14,14 @@
 # before the install" is asserted below rather than believed.
 set -euxo pipefail
 
+# Stage A built this bottle against the Qt its index resolved to. This runner
+# resolves from its own image's index unless told otherwise, so refresh first, or
+# the pour below installs whatever Qt this image happened to be built beside and
+# the pair is two image ages rather than two machines reading one index. Same
+# refresh as the four Linux lines' dist-upgrade, on the one line that has to ask.
+. "$(dirname "$0")/lib-brew-qt.sh"
+brew_refresh_index
+
 # "Clean" as a reading. If a Qt were already here, the pour below would satisfy
 # the formula's dependency whatever the formula declared, and the half of this
 # stage that asks "are the declared dependencies complete" would be answering
@@ -171,8 +179,8 @@ echo "the three Qt sub-modules are here and the meta formula is not"
 # mid-rollout hands the two stages different indexes. Saying so here is what keeps
 # the next failure from being dyld's "Symbol not found", which reads as a defect
 # in QMdmm. Both readings are facts rather than expectations, and neither is a
-# pin: the formula stays versionless on purpose. See ci/lib-brew-qt.sh.
-. "$(dirname "$0")/lib-brew-qt.sh"
+# pin: the formula stays versionless on purpose. See ci/lib-brew-qt.sh, sourced at
+# the top - which is also where this stage reads one index rather than its image's.
 brew_assert_bottle_qt_is_the_runners "serve/$bottle_file"
 
 # The recipe's own test. Nothing else in this harness runs it: `brew install`
