@@ -91,10 +91,17 @@ env:
   # actually live at, and the trust stage is what proves the rewrite took -
   # by pouring from the tap a user installs from. See release/publish-brew.sh.
   BOTTLE_ROOT_URL: http://127.0.0.1:8000
-  # Homebrew updates its own index before an install unless told not to, which
-  # on a macOS runner is minutes spent refreshing a snapshot nothing here
-  # depends on: the formula under test comes from the tap, and its Qt
-  # dependencies resolve from whatever index is on the machine.
+  # Homebrew updates its own index before an install unless told not to. It is
+  # told not to here so that the refresh happens exactly once per stage, at the
+  # top, where ci/lib-brew-qt.sh can name it - and not as a side effect of
+  # whichever `brew` command happens to run first. It still happens on this
+  # line: all three Homebrew stages - ci/pack-brew.sh, ci/runtime-brew.sh and
+  # ci/dev-brew.sh - source that file and refresh before installing anything.
+  # The tap's formula names Qt with no version, so the Qt a bottle is built
+  # against is whatever index its runner had; refreshing is what makes the
+  # bottle and the runner pouring it one answer instead of two image ages. On a
+  # release that matters twice over: the bottle published here is the one users
+  # pour.
   HOMEBREW_NO_AUTO_UPDATE: '1'
   # ---- the Alpine face -----------------------------------------------------
   # Which of the line's two keys signs this run. It is a NAME and not a secret,
