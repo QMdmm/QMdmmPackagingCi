@@ -21,6 +21,20 @@ name: Packaging smoke
 #               dependency set, then builds QMdmm's own GUI and Bot from source
 #               against the installed package via find_package(QMdmm6).
 #
+# Stage A produces a second product on this workflow's runs: one TGZ per line,
+# the same installed tree in a single file, asked of cpack in the same
+# invocation as the native package (`-G "DEB;TGZ"`). It is the install shape
+# that asks nothing of a distribution - no package manager, no metadata - and it
+# is the one product every line can make with cpack alone; the two recipe lines
+# make it in the build tree their recipe left behind. `PACK_ARCHIVE` below is
+# what switches it on, and it is set here rather than in `ci/` because `ci/` has
+# a second caller: a release publishes packages, and an unsigned tarball has no
+# place among them. No later stage consumes the archive - stages B and C
+# download `packages-<line>` and must keep seeing exactly the packages - so it
+# travels as `archive-<line>`. The Homebrew line is the one without one, and not
+# by omission: the bottle a Stage A there produces is already a tarball of the
+# installed tree, and a second copy under another name would be the same bytes.
+#
 # Ahead of A there is one more job, `resolve`: it turns the ref this run was
 # given into the single commit every stage then fetches, so a row held in the
 # runner queue for hours still builds the tree the early rows built.
@@ -157,6 +171,11 @@ env:
   # for why the difference matters.
   REQUESTED_REF: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.qmdmm_ref || 'main' }}
   QMDMM_BUILD_TYPE: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.build_type || 'Release' }}
+  # Ask stage A for the portable archive next to the native package. Set in this
+  # workflow and in no other: `release.yml` reuses the same `ci/` scripts and
+  # must keep producing exactly the artifacts it publishes. What the flag does
+  # per line is in each `ci/pack-<kind>.sh`.
+  PACK_ARCHIVE: '1'
   # Containers start with LANG unset, so Qt switches itself to C.UTF-8 and says
   # so on every launch. Setting it here keeps that noise out of the probe logs.
   LANG: C.UTF-8
@@ -330,6 +349,18 @@ jobs:
         with:
           name: packages-${{ matrix.dist.name }}
           path: out
+          if-no-files-found: error
+
+      # The archive the same cpack invocation produced. A directory of its own,
+      # not a file inside `out`: stages B and C download `packages-<line>` and
+      # must keep seeing exactly the packages, and no later stage asks a
+      # question about the archive - the packaging question was answered by
+      # building it.
+      - name: Upload the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: archive-${{ matrix.dist.name }}
+          path: out-archive
           if-no-files-found: error
 
   # ================================================================= stage B
@@ -649,6 +680,17 @@ jobs:
         with:
           name: packages-macos
           path: out
+          if-no-files-found: error
+
+      # The tarball of QMdmm6.app the same cpack invocation produced: the
+      # self-contained product without the image wrapper around it. Apart from
+      # `out` for the same reason as on the container lines - stage B downloads
+      # `packages-macos` and must keep seeing only the image.
+      - name: Upload the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: archive-macos
+          path: out-archive
           if-no-files-found: error
 
   verify-runtime-brew:

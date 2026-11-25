@@ -101,6 +101,23 @@ after=$(sed -n '/^sha512sums=/{n;p;}' /home/builder/qmdmm/APKBUILD)
 # run the setuid helper.
 su builder -c "cd /home/builder/qmdmm && HOME=/home/builder PACKAGER_PRIVKEY=/home/builder/.abuild/$PACKAGER_KEY.rsa abuild -r"
 
+# The archive generator, asked of the tree the recipe itself configured and
+# built: abuild's build() runs `cmake -B build` from $srcdir/qmdmm-$pkgver, so
+# that is where CPackConfig.cmake is and the same TGZ the cpack lines produce
+# costs no second configure and no second build here. `PACK_ARCHIVE` is set by
+# packaging-smoke.yml and by nobody else, and the archive is collected into
+# `out-archive` rather than `out`, which stages B and C download.
+if [ "${PACK_ARCHIVE:-0}" = 1 ]; then
+  archive_tree="/home/builder/qmdmm/src/qmdmm-$pkgver/build"
+  if [ ! -f "$archive_tree/CPackConfig.cmake" ]; then
+    echo "::error::no CPackConfig.cmake in $archive_tree; the recipe's own build tree is where the archive generator runs"
+    exit 1
+  fi
+  (cd "$archive_tree" && cpack -G TGZ)
+  mkdir -p out-archive
+  cp -v "$archive_tree"/*.tar.gz out-archive/
+fi
+
 # Where abuild put them is discovered rather than assumed: the directory is
 # named after the repository the image is pointed at, which is not something to
 # guess at from here.

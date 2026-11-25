@@ -103,13 +103,26 @@ cmake -S qmdmm-src -B build -G Ninja \
   -DQMDMM_EXPORT_PRIVATE=NO
 cmake --build build --parallel
 
-# Only the bundle generator: the archive generators the project also configures
-# (7Z/TGZ/TXZ/TZST/ZIP) are the *other* install shape, and are what the Homebrew
-# line packages. This line's product is the .dmg.
-(cd build && cpack -G DragNDrop)
+# The bundle generator is this line's product: the .dmg. The daily run asks for
+# TGZ in the same invocation as well, and on this line the archive is not a
+# half-measure - the install tree here *is* QMdmm6.app with its own Qt inside
+# it, so the tarball is the same self-contained product without the image
+# wrapper around it. TGZ rather than ZIP because the bundle's frameworks are
+# held together by symlinks. `PACK_ARCHIVE` is set by packaging-smoke.yml and by
+# nobody else, and the archive is collected into `out-archive` rather than
+# `out`, which stage B downloads.
+generators='DragNDrop'
+if [ "${PACK_ARCHIVE:-0}" = 1 ]; then
+  generators='DragNDrop;TGZ'
+fi
+(cd build && cpack -G "$generators")
 
 mkdir -p out
 cp -v build/*.dmg out/
+if [ "${PACK_ARCHIVE:-0}" = 1 ]; then
+  mkdir -p out-archive
+  cp -v build/*.tar.gz out-archive/
+fi
 dmg=$(ls out/*.dmg | head -1)
 test -n "$dmg"
 

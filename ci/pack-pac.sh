@@ -65,6 +65,24 @@ su builder -c "cd '$PWD/arch-build' && updpkgsums"
 su builder -c "cd '$PWD/arch-build' && makepkg -f --noconfirm"
 ls -l arch-build/*.pkg.tar.zst
 
+# The archive generator, asked of the tree the recipe itself configured and
+# built: makepkg leaves `$srcdir/$pkgname-$pkgver/build` behind with its
+# CPackConfig.cmake, so the same TGZ the cpack lines produce costs no second
+# configure and no second build here. `PACK_ARCHIVE` is set by
+# packaging-smoke.yml and by nobody else, and the archive is collected into
+# `out-archive` rather than `out`, which stages B and C download.
+if [ "${PACK_ARCHIVE:-0}" = 1 ]; then
+  pkgname=$(sed -n 's/^pkgname=\(.*\)$/\1/p' packaging/arch/PKGBUILD)
+  archive_tree="$PWD/arch-build/src/$pkgname-$pkgver/build"
+  if [ ! -f "$archive_tree/CPackConfig.cmake" ]; then
+    echo "::error::no CPackConfig.cmake in $archive_tree; the recipe's own build tree is where the archive generator runs"
+    exit 1
+  fi
+  (cd "$archive_tree" && cpack -G TGZ)
+  mkdir -p out-archive
+  cp -v "$archive_tree"/*.tar.gz out-archive/
+fi
+
 mkdir -p out
 cp -v arch-build/*.pkg.tar.zst out/
 

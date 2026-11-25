@@ -38,6 +38,19 @@ rebuilt Bot has something to talk to). Those three read `DIST_KIND` for the two
 things that really do differ per line: the timeout's exit status and the loader's
 wording.
 
+Stage A produces a second product when the daily workflow runs it: one TGZ per
+line, the same installed tree in a single file, asked of cpack in the same
+invocation as the native package (`-G "DEB;TGZ"`) and, on the two recipe lines,
+built in the tree the recipe itself left behind. It is the install shape that
+asks nothing of a distribution — no package manager, no metadata — and the one
+product every line can make with cpack alone. `PACK_ARCHIVE`, set by
+`packaging-smoke.yml` and by nothing else, is what switches it on: a release
+publishes packages, and an unsigned tarball has no place among them. It travels
+as `archive-<line>`, apart from the `packages-<line>` directory stages B and C
+download, and no later stage asks a question about it. The Homebrew line has no
+archive and that is not an omission: the bottle is already a tarball of the
+installed tree.
+
 Every job checks this repository out and downloads its artifacts *before* its
 stage script runs, so a script never has to be split around a `uses:` step. The
 `Install bash` steps stay in the workflow — one per container stage — because

@@ -30,12 +30,27 @@ cmake -S qmdmm-src -B build -G Ninja \
   -DQMDMM_EXPORT_PRIVATE=NO
 cmake --build build --parallel
 
-# Only the native generators: the archive generators the project also
-# configures (7Z/TGZ/TXZ/TZST/ZIP) are not what this workflow verifies.
-(cd build && cpack -G RPM)
+# The native generator is what stages B and C consume. The daily run asks for
+# TGZ in the same invocation as well: an archive is the install shape that asks
+# nothing of a distribution - the same installed tree, without the package
+# metadata - and it is the one product every line here can make with cpack
+# alone. `PACK_ARCHIVE` is set by packaging-smoke.yml and by nobody else, so a
+# release's artifacts do not change, and the archive is collected into
+# `out-archive` rather than `out`: stages B and C download `out` and must keep
+# seeing exactly the packages. The other archives the project also configures
+# (7Z/TXZ/TZST/ZIP) are not asked for - one format is the product, not five.
+generators='RPM'
+if [ "${PACK_ARCHIVE:-0}" = 1 ]; then
+  generators='RPM;TGZ'
+fi
+(cd build && cpack -G "$generators")
 
 mkdir -p out
 cp -v build/*.rpm out/
+if [ "${PACK_ARCHIVE:-0}" = 1 ]; then
+  mkdir -p out-archive
+  cp -v build/*.tar.gz out-archive/
+fi
 
 # Names are read back out of the packages instead of being assumed: the
 # component suffixes are what stages B and C select on.

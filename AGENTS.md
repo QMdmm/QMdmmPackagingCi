@@ -21,7 +21,11 @@ This repository holds no product code. It packages and verifies
 
 **`ci/` has two callers.** A change under `ci/` lands in the daily smoke run and
 in a release at the same time; a change under `release/` only ever lands in a
-release. When a change belongs to one of the two, say which in the file.
+release. When a change belongs to one of the two, say which in the file. A
+product only one caller should get is switched by an environment variable that
+workflow sets, never by an `if:` on the event: `PACK_ARCHIVE` is the one today —
+stage A's portable archive, which the daily run asks for and a release must not
+(see `ci/pack-<kind>.sh` and the note above `packaging-smoke.yml`'s `env:`).
 
 ## What is where
 
