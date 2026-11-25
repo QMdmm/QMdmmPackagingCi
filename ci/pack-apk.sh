@@ -99,7 +99,13 @@ after=$(sed -n '/^sha512sums=/{n;p;}' /home/builder/qmdmm/APKBUILD)
 # No -d. It means "do not resolve dependencies" and would short-circuit exactly
 # what this stage exists to check; it was only ever needed because proot cannot
 # run the setuid helper.
-su builder -c "cd /home/builder/qmdmm && HOME=/home/builder PACKAGER_PRIVKEY=/home/builder/.abuild/$PACKAGER_KEY.rsa abuild -r"
+#
+# -K keeps the buildtime directories (srcdir/pkgdir/deps), and the archive
+# below needs it: abuild's own cleanup removes $srcdir, which is where the
+# configured build tree is. On the Arch line nothing does that for us and the
+# same step needs no flag; here the tree is gone by the time abuild returns
+# unless it is asked to keep it.
+su builder -c "cd /home/builder/qmdmm && HOME=/home/builder PACKAGER_PRIVKEY=/home/builder/.abuild/$PACKAGER_KEY.rsa abuild -r -K"
 
 # The archive generator, asked of the tree the recipe itself configured and
 # built: abuild's build() runs `cmake -B build` from $srcdir/qmdmm-$pkgver, so
