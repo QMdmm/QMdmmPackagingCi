@@ -497,11 +497,63 @@ summary, next to the architecture the machine actually is — `ci/runtime-macos.
 asserts the second one, because a row that landed on the wrong architecture would
 silently run the other slice and duplicate its neighbour.
 
+## The Windows line
+
+One stage and one product: one ZIP of the installed tree, named the way cpack
+names an archive (`QMdmm-<version>-<system>.zip`). There is no package, because
+the machines this line serves have no package manager that could install one, and
+no repository here to publish one to.
+
+What this line does differently from the others:
+
+* **The archive is the deliverable, not a second product next to one.** Every
+  other cpack line asks for a portable archive in the *same* invocation as its
+  native package, switched by `PACK_ARCHIVE`, so that a release gets packages and
+  only the daily run gets archives. Here the ZIP is what `cpack -G ZIP` produces
+  and nothing else is asked for. That is also why this line has no `PACK_ARCHIVE`
+  switch: the flag exists to keep an archive out of a release, and this line has
+  one caller — the daily run. A release that starts shipping it decides that then.
+
+* **There is no stage B and no stage C, and neither is a gap left by accident.**
+  Those stages ask whether the runtime installs and runs on a clean machine, and
+  whether a consumer builds against the dev package. On a Windows runner the
+  machine that would answer either question is the machine that just built the
+  tree, with the toolchain and Qt still installed, so the answer would describe
+  the runner. What `ci/pack-windows.sh` asserts instead is the shape of the
+  archive: the programs, the shared libraries the project installs itself, the
+  Core headers and the CMake package, and no entry carrying an absolute path — a
+  ZIP that keeps the install prefix in its member names would unpack onto a path
+  nobody chose.
+
+* **Nothing is deployed into it.** The ZIP carries no Qt, which is the same
+  statement the Linux TGZ makes and not a defect: nothing in the project deploys
+  Qt into a product except the bundle step, which lives under
+  `QMDMM_MACOS_APP_BUNDLE` and is macOS-only. So a machine that unpacks this needs
+  Qt 6.8 or newer of its own, exactly as a machine that unpacks a Linux TGZ needs
+  its distribution's Qt. "It starts" is therefore not one of the criteria here —
+  there is no Windows machine available to check it on either.
+
+Because cpack's ZIP generator has no components, one file carries what the Linux
+lines divide between runtime, dev and doc packages: the headers and
+`lib/cmake/QMdmm6/` are in it. That is the same shape a Linux TGZ has, and the
+reason the archive assertions name them rather than treating them as extra
+content.
+
+One script, `ci/pack-windows.sh`: fetch the ref, configure for MSVC with the
+official Qt the workflow installed, build, `cpack -G ZIP`, then read the archive
+back. The workflow names the Qt architecture (`win64_msvc2022_64`) and pins the
+`aqtinstall` backend, for a reason that is about Qt's packaging and not its
+version: from 6.11 on, Qt splits the Windows desktop package folders per
+architecture, and the backend the action ships by default still asks for the old
+path and dies with `Failed to locate XML data`. The pin is the same one QMdmm's
+own `ci.yml` carries, and it goes away when `aqtinstall` cuts a release with that
+fix in it.
+
 ## Running it
 
 Daily, on a schedule: the whole suite re-runs against `main` and `Release` — the
-four containers and the macOS jobs — so a packaging regression surfaces within a
-day rather than at the next release. The
+container lines, the macOS jobs and the Windows job — so a packaging regression
+surfaces within a day rather than at the next release. The
 `cron` field reads `0 20 * * *`, but the field is not when the runs start:
 GitHub's scheduler has no timezone setting and launches scheduled runs hours
 after the trigger it was given. That lateness is stable per cron value but not

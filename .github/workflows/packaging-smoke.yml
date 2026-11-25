@@ -35,6 +35,14 @@ name: Packaging smoke
 # by omission: the bottle a Stage A there produces is already a tarball of the
 # installed tree, and a second copy under another name would be the same bytes.
 #
+# The Windows line is stage A alone, and its product is that archive rather than
+# a package beside it: the machines it serves have no package manager to install
+# one with, and there is no repository here to publish one to. It also has no
+# stage B or C - on a Windows runner the machine that would answer either
+# question is the machine that just built the tree, toolchain and Qt included, so
+# the answer would describe the runner and not the product. Nothing is deployed
+# into the ZIP: only the .dmg line bundles Qt into what it ships.
+#
 # Ahead of A there is one more job, `resolve`: it turns the ref this run was
 # given into the single commit every stage then fetches, so a row held in the
 # runner queue for hours still builds the tree the early rows built.
@@ -921,3 +929,67 @@ jobs:
       # needs port 6366: ci/run-verify-macos.sh.
       - name: Run the rebuilt Bot against the installed Server
         run: ci/run-verify-macos.sh
+
+  # ---- the Windows face, stage A only ---------------------------------------
+  #
+  # The same stage-A question - fetch the ref, build, pack the installed tree -
+  # put to the platform with no distribution behind it. What it produces is not a
+  # package: a ZIP of the installed tree is the product, because the machines this
+  # line serves have no package manager that could install one.
+  #
+  # It has no stage B and no stage C, and that is a limit rather than a gap. Those
+  # stages ask whether the runtime installs and runs on a clean machine, and
+  # whether a consumer builds against the dev package; on a Windows runner the
+  # machine that would answer either is the machine that just built the tree, so
+  # the answer would be about the runner. What ci/pack-windows.sh asserts instead
+  # is the shape of the archive - the programs, the libraries the project installs
+  # itself, and the development content, which comes along because cpack's ZIP
+  # generator has no components.
+  #
+  # The ZIP carries no Qt, the same statement the Linux TGZ makes: only the .dmg
+  # line deploys Qt into what it ships. A machine that unpacks this needs Qt 6.8
+  # or newer of its own, which is why "it starts" is not one of the criteria here.
+  pack-windows:
+    name: "A pack (windows)"
+    needs: resolve
+    env:
+      QMDMM_REF: ${{ needs.resolve.outputs.ref }}
+    runs-on: windows-latest
+    steps:
+      - name: Checkout this harness
+        uses: actions/checkout@v7
+
+      # The official archive, as on the .dmg line - a distribution does not
+      # package Qt for MSVC. `arch` is named rather than left to the action's
+      # default because it has to be the architecture of the tree being built, and
+      # WebSockets is the one add-on module QMdmmNetworking links against.
+      #
+      # `aqtsource` pins the backend for a reason that is not about Qt's version:
+      # Qt split the Windows desktop package folders per architecture from 6.11
+      # on, and the aqtinstall this action ships by default still asks for the old
+      # path, so it dies with "Failed to locate XML data". The commit below is the
+      # upstream fix, named in full so the runner stays reproducible; drop this
+      # line once aqtinstall cuts a release that carries it. The same pin, for the
+      # same reason, is in QMdmm's own `ci.yml`.
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.12.*'
+          aqtsource: 'git+https://github.com/miurahr/aqtinstall.git@076e1659807d0b362a3ed684d54c2e9c775eb9c7'
+          arch: win64_msvc2022_64
+          modules: 'qtwebsockets'
+
+      # The whole stage, in ci/pack-windows.sh: fetch QMdmm at this run's ref,
+      # configure for MSVC, build, pack a ZIP, and read the archive back.
+      - name: Pack
+        run: ci/pack-windows.sh
+
+      # The only artifact this line makes, and the one place it differs from every
+      # other line's naming: there is no `packages-windows`, because there is no
+      # package and no later stage to download one. What travels is the archive.
+      - name: Upload the archive
+        uses: actions/upload-artifact@v7
+        with:
+          name: archive-windows
+          path: out-archive
+          if-no-files-found: error
